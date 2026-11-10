@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "warden"
+version = "0.1.0"
+description = "A control plane for running enterprise AI agents under policy, approval, audit, and instant revocation."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "pydantic>=2.6",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+live = ["anthropic>=0.40"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "playwright>=1.40",
+    "ruff>=0.17,<0.18",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests/unit"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["error"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "W"]

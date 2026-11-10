@@ -1,0 +1,141 @@
+"""HTTP tests for the API: start, stream, approve, revoke, and the read-only endpoints.
+
+These use an async client over the ASGI app so the run's background task shares the test's event
+loop. The sync TestClient cancels background tasks between calls, so it cannot drive this app.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+
+import httpx
+import pytest
+from httpx import ASGITransport
+
+from warden.api.app import create_app
+from warden.config import Settings
+
+
+def _app(**overrides):
+    base = {"mode": "replay", "demo_step_delay_seconds": 0.0, "approval_timeout_seconds": 10.0}
+    base.update(overrides)
+    return create_app(Settings(**base))
+
+
+def _client(app) -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+async def _poll(client, run_id, predicate, tries: int = 1000):
+    snap = {}
+    for _ in range(tries):
+        snap = (await client.get(f"/api/sessions/{run_id}")).json()
+        if predicate(snap):
+            return snap
+        await asyncio.sleep(0.005)
+    return snap
+
+
+async def _approve_when_pending(client, run_id) -> None:
+    snap = await _poll(client, run_id, lambda s: s["pending_action_ids"] or s["done"])
+    if snap.get("pending_action_ids"):
+        await client.post(
+            f"/api/sessions/{run_id}/approve",
+            json={"action_id": snap["pending_action_ids"][0], "approved": True},
+        )
+
+
+async def test_read_only_endpoints():
+    async with _client(_app()) as client:
+        assert (await client.get("/healthz")).json()["status"] == "ok"
+        config = (await client.get("/api/config")).json()
+        assert config["mode"] == "replay"
+        assert config["live_ready"] is False
+        # With no GitHub token configured, the repository tool is the synthetic one.
+        assert config["repo_backend"] == {"backend": "synthetic"}
+        policy = (await client.get("/api/policy")).json()
+        assert len(policy["rules"]) >= 3
+        assert policy["ruleset_version"]
+
+
+def test_config_reports_github_backend_when_configured(monkeypatch):
+    # Reading config never touches the network; it only reflects the env, so this is safe offline.
+    monkeypatch.setenv("WARDEN_GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("WARDEN_GITHUB_ORG", "throwaway-org")
+    monkeypatch.setenv("WARDEN_GITHUB_ALLOW_WRITES", "false")
+    from fastapi.testclient import TestClient
+
+    cfg = TestClient(create_app(Settings(mode="replay"))).get("/api/config").json()
+    assert cfg["repo_backend"]["backend"] == "github"
+    assert cfg["repo_backend"]["org"] == "throwaway-org"
+    assert cfg["repo_backend"]["writes_enabled"] is False
+
+
+async def test_full_run_with_approval_completes():
+    async with _client(_app()) as client:
+        start = (await client.post("/api/sessions", json={})).json()
+        run_id = start["run_id"]
+        assert start["source"] == "synthetic"
+        await _approve_when_pending(client, run_id)
+        snap = await _poll(client, run_id, lambda s: s["done"])
+
+        assert snap["status"] == "completed"
+        types = [e["type"] for e in snap["events"]]
+        assert "approval.requested" in types
+        assert "session.completed" in types
+        executed = [e for e in snap["events"] if e["type"] == "action.executed"]
+        assert len(executed) >= 6
+        denied = [
+            e for e in snap["events"]
+            if e["type"] == "action.blocked" and e["data"].get("outcome") == "denied"
+        ]
+        assert denied, "the privileged over-reach should be denied"
+
+
+async def test_revoke_stops_the_run():
+    # A small step delay guarantees the revoke lands before the first action executes.
+    async with _client(_app(demo_step_delay_seconds=0.1)) as client:
+        run_id = (await client.post("/api/sessions", json={})).json()["run_id"]
+        assert (await client.post(f"/api/sessions/{run_id}/revoke", json={})).json()["revoked"]
+        snap = await _poll(client, run_id, lambda s: s["done"])
+
+        assert snap["status"] == "revoked"
+        assert not any(e["type"] == "action.executed" for e in snap["events"])
+
+
+async def test_sse_stream_follows_a_run_to_completion():
+    async with _client(_app()) as client:
+        run_id = (await client.post("/api/sessions", json={})).json()["run_id"]
+        approver = asyncio.create_task(_approve_when_pending(client, run_id))
+        seen: list[str] = []
+        async with client.stream("GET", f"/api/sessions/{run_id}/events") as resp:
+            assert resp.status_code == 200
+            assert resp.headers["content-type"].startswith("text/event-stream")
+            async for line in resp.aiter_lines():
+                if line.startswith("data:"):
+                    event = json.loads(line[len("data:"):].strip())
+                    seen.append(event["type"])
+                    if event["type"] == "session.completed":
+                        break
+        await approver
+        assert seen[0] == "session.started"
+        assert "approval.requested" in seen
+        assert seen[-1] == "session.completed"
+
+
+async def test_benchmark_endpoint_shows_the_fix():
+    async with _client(_app()) as client:
+        report = (await client.get("/api/benchmark")).json()
+        rows = {r["label"]: r for r in report["rows"]}
+        nofix = rows["Offline validator, no signal"]
+        fix = rows["Offline validator, CAEP signal"]
+        assert fix["max_seconds"] < nofix["median_seconds"]
+
+
+async def test_unknown_run_is_404():
+    async with _client(_app()) as client:
+        assert (await client.get("/api/sessions/nope")).status_code == 404
+        with pytest.raises(httpx.HTTPStatusError):
+            r = await client.post("/api/sessions/nope/approve", json={"action_id": "x"})
+            r.raise_for_status()

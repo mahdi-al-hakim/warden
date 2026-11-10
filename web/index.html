@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Warden</title>
+  <link rel="preload" href="/static/fonts/geist-sans.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/static/fonts/geist-mono.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <span class="brand-text">
+        <span class="brand-name">WARDEN</span>
+        <span class="brand-sub">access control plane</span>
+      </span>
+    </div>
+    <div class="status-center">
+      <span class="status-pill" id="run-status" data-state="idle">Idle</span>
+    </div>
+    <div class="topbar-meta">
+      <span class="chip" id="mode-chip" title="Run source">loading</span>
+      <span class="chip" id="repo-chip" title="Repository backend" hidden></span>
+      <span class="chip chip-quiet" id="ruleset-chip" title="Policy ruleset"></span>
+      <span class="clock" id="clock" title="UTC" aria-hidden="true"></span>
+    </div>
+  </header>
+
+  <main class="console">
+    <section class="panel activity" aria-labelledby="activity-title">
+      <div class="panel-head">
+        <h2 id="activity-title">Agent activity</h2>
+        <span class="head-note">every action checked before it runs</span>
+      </div>
+      <div class="task-bar">
+        <span class="task-key">TASK</span>
+        <p class="task-text" id="task-text"></p>
+      </div>
+      <ol class="stream" id="timeline" aria-live="polite"></ol>
+      <div class="empty" id="activity-empty">
+        <div class="empty-mark" aria-hidden="true"></div>
+        <p>Press <kbd>R</kbd> or <strong>Start run</strong> to watch the agent offboard a departing
+           contractor. Each step is checked, high-risk steps wait for you, and the kill switch stops
+           it on the spot.</p>
+      </div>
+    </section>
+
+    <aside class="side">
+      <section class="panel" aria-labelledby="console-title">
+        <div class="panel-head"><h2 id="console-title">Operator console</h2></div>
+        <div class="actions">
+          <button class="btn btn-primary" id="start-btn">Start run<kbd>R</kbd></button>
+          <button class="btn btn-danger" id="revoke-btn" disabled>Revoke<kbd>K</kbd></button>
+        </div>
+        <div class="kill" id="kill-note" hidden>
+          <span class="kill-dot" aria-hidden="true"></span>
+          <span id="kill-text">Access revoked. The next action the agent tries is blocked.</span>
+        </div>
+        <dl class="facts">
+          <div><dt>Source</dt><dd id="fact-source">synthetic</dd></div>
+          <div><dt>Policy</dt><dd>default deny</dd></div>
+          <div><dt>Approvals</dt><dd>held for high risk</dd></div>
+        </dl>
+      </section>
+
+      <section class="panel approval" id="approval-card" hidden aria-labelledby="approval-title">
+        <div class="panel-head"><h2 id="approval-title">Approval required</h2></div>
+        <div class="approval-detail" id="approval-detail"></div>
+        <div class="actions">
+          <button class="btn btn-ok" id="approve-btn">Approve<kbd>A</kbd></button>
+          <button class="btn btn-plain" id="deny-btn">Deny<kbd>D</kbd></button>
+        </div>
+      </section>
+
+      <section class="panel resources" aria-labelledby="resources-title">
+        <div class="panel-head"><h2 id="resources-title">Access state</h2></div>
+        <ul class="resource-list" id="resource-list"></ul>
+      </section>
+
+      <section class="panel reliability" aria-labelledby="reliability-title">
+        <div class="panel-head">
+          <h2 id="reliability-title">Reliability</h2>
+          <button class="btn btn-ghost" id="eval-btn">Run checks<kbd>E</kbd></button>
+        </div>
+        <p class="reliability-sub" id="eval-summary">Scenario checks and the revocation benchmark.</p>
+        <div class="bars" id="bars"></div>
+        <p class="footnote" id="bench-note"></p>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="footer">
+    <span class="disclaimer">Synthetic data. No real accounts are touched.</span>
+    <span class="shortcuts" aria-hidden="true">
+      <kbd>R</kbd> run <kbd>K</kbd> revoke <kbd>A</kbd> approve <kbd>D</kbd> deny <kbd>E</kbd> checks
+    </span>
+    <span id="foot-model"></span>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

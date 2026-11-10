@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Lint, tests, and the reliability eval
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e ".[dev,live]"
+
+      - name: Lint
+        run: python -m ruff check src tests scripts
+
+      - name: Unit tests
+        run: python -m pytest -q
+
+      - name: Reliability eval
+        # Exits non-zero if any scenario or invariant fails, so the governance checks gate the build.
+        run: python -m warden.eval
+
+  browser:
+    name: Browser end-to-end tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e ".[dev,live]"
+
+      - name: Install the browser
+        run: python -m playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: python -m pytest tests/e2e -q

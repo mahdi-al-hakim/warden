@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Env and secrets (never commit a real key)
+.env
+.env.*
+!.env.example
+
+# Test and tooling artifacts
+.pytest_cache/
+.ruff_cache/
+tests/e2e/screenshots/*.png
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
