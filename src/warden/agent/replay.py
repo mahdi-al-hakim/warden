@@ -118,14 +118,17 @@ class ReplayAgent:
         meta: dict[str, Any] | None = None,
         step_delay_seconds: float = 0.0,
         summarize_finish: bool = True,
+        recorded_outcomes: list[str] | None = None,
     ) -> None:
         self.steps = steps if steps is not None else OFFBOARDING_TRAJECTORY
         self.source = source
         self.meta = meta or {"note": "authored demo trajectory"}
         self.step_delay_seconds = step_delay_seconds
-        # The synthetic demo rewrites its closing line from the real outcomes; a recorded run keeps
-        # whatever closing message it actually produced.
+        # The authored run builds its closing line from the real outcomes. A recorded run keeps the
+        # closing message the model actually wrote, but only while this replay turns out the same
+        # way the recording did; see _closing.
         self.summarize_finish = summarize_finish
+        self.recorded_outcomes = recorded_outcomes
         self._index = 0
 
     async def propose(self, task: str, history: list[dict[str, Any]]) -> AgentStep:
@@ -138,34 +141,67 @@ class ReplayAgent:
         else:
             step = self.steps[self._index]
             self._index += 1
-        if step.kind == "finish" and self.summarize_finish:
-            return AgentStep(kind="finish", message=_offboarding_summary(history))
+        if step.kind == "finish":
+            return AgentStep(kind="finish", message=self._closing(step.message, history))
         return step
+
+    def _closing(self, recorded: str, history: list[dict[str, Any]]) -> str:
+        if self.summarize_finish:
+            return _offboarding_summary(history)
+        if self.recorded_outcomes is not None and self.recorded_outcomes == [
+            h.get("outcome") for h in history
+        ]:
+            return recorded
+        # The operator decided differently than in the recording (or the file does not say how the
+        # recording went), so the model's own closing words may describe things that did not
+        # happen here. Report what did.
+        return (
+            "This replay went differently from the recorded run, so its closing message does not "
+            "apply. " + _offboarding_summary(history)
+        )
 
     @classmethod
     def from_file(cls, path: str | Path, *, step_delay_seconds: float = 0.0) -> ReplayAgent:
-        """Build an agent from a recorded trajectory file. The source is read from the file."""
+        """Build an agent from a recorded trajectory file.
+
+        The label is always "replay of" whatever the file names, so a file can never present a
+        replay as a live run.
+        """
         steps, meta = load_trajectory(path)
         return cls(
             steps,
-            source=meta.get("source", "recorded"),
+            source=f"replay of {meta.get('source') or 'a recorded run'}",
             meta=meta,
             step_delay_seconds=step_delay_seconds,
             summarize_finish=False,
+            recorded_outcomes=meta.get("outcomes"),
         )
 
 
 def save_trajectory(
-    steps: list[AgentStep], path: str | Path, *, source: str, task: str = ""
+    steps: list[AgentStep],
+    path: str | Path,
+    *,
+    source: str,
+    task: str = "",
+    outcomes: list[str] | None = None,
 ) -> None:
-    """Write a trajectory to disk so a later replay can load it. Used by the record script."""
-    payload = {
+    """Write a trajectory to disk so a later replay can load it.
+
+    `outcomes` is how each tool step turned out in the recorded run. A replay uses it to tell
+    whether the recorded closing message still describes what happened.
+    """
+    payload: dict[str, Any] = {
         "schema": TRAJECTORY_SCHEMA,
         "source": source,
         "task": task,
         "steps": [step.model_dump() for step in steps],
     }
-    Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    if outcomes is not None:
+        payload["outcomes"] = outcomes
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
 def load_trajectory(path: str | Path) -> tuple[list[AgentStep], dict[str, Any]]:
@@ -174,5 +210,8 @@ def load_trajectory(path: str | Path) -> tuple[list[AgentStep], dict[str, Any]]:
     if raw.get("schema") != TRAJECTORY_SCHEMA:
         raise ValueError(f"unexpected trajectory schema: {raw.get('schema')!r}")
     steps = [AgentStep.model_validate(item) for item in raw.get("steps", [])]
-    meta = {"source": raw.get("source", "recorded"), "task": raw.get("task", "")}
+    meta: dict[str, Any] = {"source": raw.get("source", "recorded"), "task": raw.get("task", "")}
+    outcomes = raw.get("outcomes")
+    if isinstance(outcomes, list) and all(isinstance(o, str) for o in outcomes):
+        meta["outcomes"] = outcomes
     return steps, meta

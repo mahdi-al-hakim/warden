@@ -375,14 +375,27 @@ async def test_the_run_ends_with_the_control_planes_own_check_of_the_end_state()
     assert all(c["status"] == "done" for c in verified["checks"])
 
 
+class _ClaimsItIsDone:
+    """Revokes one app, then says the whole offboarding is finished."""
+
+    source = "test"
+
+    def __init__(self) -> None:
+        self._turn = 0
+
+    async def propose(self, task, history):
+        self._turn += 1
+        if self._turn == 1:
+            return AgentStep(kind="tool", tool="directory", operation="revoke_access",
+                             arguments={"user_id": "jordan.lee", "app": "crm"},
+                             message="Revoking CRM.")
+        return AgentStep(kind="finish", message="All done, Jordan is fully offboarded.")
+
+
 async def test_verification_shows_what_the_agent_left_undone():
-    # An agent that revokes one app and declares victory: its message can say anything, but the
-    # control plane's check reports every step it skipped.
-    lazy = ReplayAgent(steps=[
-        AgentStep(kind="tool", tool="directory", operation="revoke_access",
-                  arguments={"user_id": "jordan.lee", "app": "crm"}, message="Revoking CRM."),
-        AgentStep(kind="finish", message="All done, Jordan is fully offboarded."),
-    ], summarize_finish=False)
+    # The agent's message can say anything; the control plane's check reports every step it
+    # skipped.
+    lazy = _ClaimsItIsDone()
     events, emit = _collector()
     cp = build_control_plane(task=OFFBOARDING_TASK, emit=emit)
     await run_session(agent=lazy, broker=cp.broker, session=cp.session,

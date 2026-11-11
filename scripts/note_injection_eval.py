@@ -174,12 +174,30 @@ async def run_model(client: Any, model: str, out: Path, budget: dict[str, float]
     return records
 
 
-def _first_valid_trajectory(rec: dict[str, Any]) -> list[AgentStep]:
+def _trajectory(rec: dict[str, Any]) -> tuple[list[AgentStep], list[str]]:
+    proposals = rec["score"]["proposals"]
     steps = [AgentStep(kind="tool", tool=p["tool"], operation=p["operation"],
-                       arguments=p["arguments"], message=p["message"])
-             for p in rec["score"]["proposals"]]
+                       arguments=p["arguments"], message=p["message"]) for p in proposals]
     steps.append(AgentStep(kind="finish", message=rec["score"]["closing_message"]))
-    return steps
+    return steps, [p["outcome"] for p in proposals]
+
+
+def export_trajectories(per_model: list[list[dict[str, Any]]], out: Path) -> None:
+    """One replayable trajectory per model: the first valid run with the note, by run number."""
+    for model, rs in zip(MODELS, per_model, strict=True):
+        first = next((r for r in sorted(rs, key=lambda r: r.get("index", 0))
+                      if r.get("arm") == "note" and r.get("score", {}).get("valid")), None)
+        if first:
+            steps, outcomes = _trajectory(first)
+            day = first["started_at"][:10]
+            save_trajectory(steps, out / "trajectories" / f"{model}.json",
+                            source=f"recorded:{model} ({day}, note run {first['index']:02d})",
+                            task=OFFBOARDING_TASK, outcomes=outcomes)
+
+
+def load_runs(out: Path) -> list[list[dict[str, Any]]]:
+    return [[json.loads(f.read_text(encoding="utf-8"))
+             for f in sorted((out / "runs" / model).glob("*.json"))] for model in MODELS]
 
 
 def summarize(records: list[dict[str, Any]], out: Path, spent: float) -> None:
@@ -229,23 +247,23 @@ async def main_async(args: argparse.Namespace) -> int:
     await positive_controls()
     if args.controls_only:
         return 0
+    out = Path(args.out)
+    if args.from_runs:
+        # Rebuild the table and the trajectories from saved run files, with no API calls.
+        per_model = load_runs(out)
+        records = [r for rs in per_model for r in rs]
+        summarize(records, out, sum(r.get("cost_usd", 0.0) for r in records))
+        export_trajectories(per_model, out)
+        return 0
     from anthropic import AsyncAnthropic
 
     client = AsyncAnthropic(max_retries=4)
-    out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     budget = {"spent": 0.0, "cap": args.max_usd}
     per_model = await asyncio.gather(*(run_model(client, m, out, budget) for m in MODELS))
     records = [r for rs in per_model for r in rs]
     summarize(records, out, budget["spent"])
-    for model, rs in zip(MODELS, per_model, strict=True):
-        first = next((r for r in rs if r.get("arm") == "note" and r.get("score", {}).get("valid")),
-                     None)
-        if first:
-            day = first["started_at"][:10]
-            save_trajectory(_first_valid_trajectory(first), out / "trajectories" / f"{model}.json",
-                            source=f"recorded:{model} ({day}, note run {first['index']:02d})",
-                            task=OFFBOARDING_TASK)
+    export_trajectories(per_model, out)
     return 0
 
 
@@ -256,6 +274,8 @@ def main() -> int:
     parser.add_argument("--max-usd", type=float, default=6.0, help="stop starting runs past this")
     parser.add_argument("--controls-only", action="store_true",
                         help="check the counter on the authored runs and exit, no API calls")
+    parser.add_argument("--from-runs", action="store_true",
+                        help="rebuild the table and trajectories from saved runs, no API calls")
     return asyncio.run(main_async(parser.parse_args()))
 
 
