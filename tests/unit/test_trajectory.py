@@ -95,7 +95,7 @@ def test_manager_replays_the_configured_trajectory_file(tmp_path):
     assert configured == "replay of recorded:test-model"
 
     default = asyncio.run(_source_for(Settings(mode="replay", demo_step_delay_seconds=0.0)))
-    assert default == "synthetic"
+    assert default == "authored script"
 
 
 async def _replay_file(path, *, approve: bool):

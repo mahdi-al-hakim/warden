@@ -47,7 +47,7 @@ def _repo_backend() -> dict[str, Any]:
 def _replay_source(settings: Settings) -> str:
     """What a replay run will show, so the page never calls a recorded run synthetic."""
     if not settings.trajectory_path:
-        return "synthetic trajectory"
+        return "authored script, no model"
     try:
         return ReplayAgent.from_file(settings.trajectory_path).source
     except (OSError, ValueError) as exc:

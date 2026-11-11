@@ -1,14 +1,15 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "warden"
 version = "0.1.0"
-description = "A control plane for running enterprise AI agents under policy, approval, audit, and instant revocation."
+description = "A control plane that runs an AI agent on access-management work under policy, human approval, a hash-chained audit log, and a revocation kill switch."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
@@ -17,7 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-live = ["anthropic>=0.40"]
+live = ["anthropic>=0.75,<3"]  # tested live on 0.75.0 and 2.8.0
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

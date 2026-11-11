@@ -272,7 +272,7 @@ function handleEvent(event) {
   const d = event.data || {};
   switch (event.type) {
     case "session.started":
-      dom.factSource.textContent = d.source || "synthetic";
+      dom.factSource.textContent = d.source || "authored script";
       setStatus("running", "Running");
       break;
     case "action.proposed": onProposed(d); break;
@@ -311,7 +311,8 @@ function onCompleted(d) {
   if (state.runId) showAudit(state.runId);
   if (d.failed) finishRun("failed", "Failed");
   else if (d.revoked) finishRun("revoked", "Revoked");
-  else if (d.verified && !d.verified.complete) finishRun("incomplete", "Incomplete");
+  else if (!d.verified) finishRun("incomplete", "Not verified");
+  else if (!d.verified.complete) finishRun("incomplete", "Incomplete");
   else finishRun("completed", "Completed");
 }
 
@@ -486,13 +487,13 @@ function renderBars(bench) {
   const points = bench.rows[0]?.trials || 25;
   dom.benchNote.textContent =
     `Seconds from revoke to the first denied action, over ${points} revoke times with a ${ttl}s ` +
-    `cached credential, on a deterministic clock. The gateway checks live. The CAEP signal ` +
+    `cached credential, on a simulated clock. The gateway checks live. The CAEP-style signal ` +
     `invalidates the cached grant on revoke.`;
 }
 
 async function runEval() {
   dom.evalBtn.disabled = true;
-  dom.evalSummary.textContent = "Running scenarios and the benchmark...";
+  dom.evalSummary.textContent = "Running the scenarios and the revocation model...";
   try {
     const report = await api.evaluation();
     dom.evalSummary.textContent =
@@ -581,8 +582,8 @@ async function boot() {
     dom.modeChip.classList.add("live");
     dom.footModel.textContent = "Live model: " + config.model;
   } else {
-    dom.modeChip.textContent = "replay: " + (config.replay_source || "synthetic trajectory");
-    dom.footModel.textContent = "Replay mode. Set a key and WARDEN_MODE=live to drive a real model.";
+    dom.modeChip.textContent = "replay: " + (config.replay_source || "authored script, no model");
+    dom.footModel.textContent = "Replay mode. Set a key and WARDEN_MODE=live to drive a Claude model.";
   }
   dom.disclaimer.textContent = disclaimerFor(config.repo_backend);
   renderBars(bench);

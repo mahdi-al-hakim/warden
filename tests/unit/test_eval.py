@@ -66,7 +66,7 @@ def test_benchmark_shows_the_gap_and_the_fix():
     rows = {r.label: r for r in report.rows}
     gateway = rows["Gateway, live check"]
     nofix = rows["Offline validator, no signal"]
-    fix = rows["Offline validator, CAEP signal"]
+    fix = rows["Offline validator, CAEP-style signal"]
 
     assert all(r.positive_controls_passed for r in report.rows)
     # The gateway checks live, so it stops on the next call.

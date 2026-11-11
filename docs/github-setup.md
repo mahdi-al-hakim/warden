@@ -1,78 +1,78 @@
 # Driving a real GitHub repo, safely
 
-By default Warden uses a synthetic repository tool, so the demo and the tests never touch GitHub. If
-you want the agent to act on a real system during a demo, you can point the repository tool at GitHub.
-This guide sets that up so it is safe to show live and cannot touch anything real.
-
-The agent removes a departing contractor from a repository. The whole setup is a throwaway org with a
-throwaway test account, so the only thing that can ever be removed is an account you created for this.
+By default Warden uses a synthetic repository tool, so the demo and the tests never touch GitHub. This
+guide points the repository tool at a throwaway GitHub org instead, set up so that the only account it
+can ever remove is one you created for the purpose.
 
 ## What makes it safe
 
-The connector enforces three guardrails itself, so the agent cannot get past them no matter what it
-proposes:
+The connector enforces three limits itself, so nothing the agent proposes gets past them:
 
-- It only acts inside the one org you configure. The agent never supplies the org.
-- It only removes logins on your explicit test-account allowlist. Any other login is refused.
-- Writes are a dry run until you explicitly turn them on, so a rehearsal changes nothing.
+- It only acts inside the one org you configure, and only on the repos you list. The agent never
+  supplies the org.
+- It only removes logins on your test-account allowlist. Any other login is refused.
+- Writes are a dry run until you turn them on, so a rehearsal changes nothing.
 
-On top of that, use a throwaway org and a fine-grained token scoped to only the throwaway repos, so even
-the credential cannot reach anything you care about.
+Use a throwaway org and a fine-grained token scoped to only its repos as well, so even the credential
+can't reach anything you care about.
 
 ## One-time setup
 
-1. Create a new GitHub organization you will use only for this. A free org is fine. Do not use your
-   personal account's repos or any org with real work in it.
+1. Create a GitHub organization used only for this. A free org is fine.
 
-2. Create a second throwaway GitHub account to play the departing contractor, or use any test account
-   you control. Note its login. This is the only account the agent will be allowed to remove.
+2. Create a second throwaway account to play the departing contractor, and note its login. This is
+   the only account the agent will be allowed to remove.
 
-3. In the throwaway org, create a repo (for example `payments-api`) and add the test account as a
-   collaborator, so there is something to remove.
+3. In the org, create a repo (for example `payments-api`) and invite the test account as a
+   collaborator. Sign in as the test account and accept the invitation; until then it isn't a
+   collaborator and there is nothing to remove.
 
 4. Create a fine-grained personal access token (Settings, Developer settings, Fine-grained tokens):
    - Resource owner: the throwaway org.
-   - Repository access: only the throwaway repo(s), never "all repositories".
-   - Repository permissions: Administration, read and write. That is what managing a collaborator
-     needs. Grant nothing else.
-   - Short expiry, for example 7 days.
+   - Repository access: only the throwaway repo(s).
+   - Repository permissions: Administration, read and write, which managing collaborators needs.
+     Nothing else.
+   - A short expiry, such as 7 days.
 
-   A fine-grained token scoped to only these repos cannot touch anything else, even if it leaks.
+5. Export these before starting the server (the names are also in `.env.example`). Keep writes off
+   for now:
 
-5. Export these in your shell before running (the names are in `.env.example`; the server reads them
-   from the environment). Keep `WARDEN_GITHUB_ALLOW_WRITES=false` for now:
-
-   ```
-   WARDEN_GITHUB_TOKEN=github_pat_...
-   WARDEN_GITHUB_ORG=your-throwaway-org
-   WARDEN_GITHUB_REPOS=payments-api
-   WARDEN_GITHUB_TEST_LOGINS=your-contractor-test-login
-   WARDEN_GITHUB_ALLOW_WRITES=false
+   ```bash
+   export WARDEN_GITHUB_TOKEN=github_pat_...
+   export WARDEN_GITHUB_ORG=your-throwaway-org
+   export WARDEN_GITHUB_REPOS=payments-api
+   export WARDEN_GITHUB_TEST_LOGINS=your-contractor-test-login
+   export WARDEN_GITHUB_ALLOW_WRITES=false
    ```
 
-## Rehearse first (dry run, changes nothing)
+With the connector on, Jordan Lee's directory record is linked to the alphabetically first login in
+`WARDEN_GITHUB_TEST_LOGINS`, so list only the account playing Jordan. The link lets the agent find
+Jordan's login and lets the subject scope accept removing it. Directory and VPN stay synthetic.
 
-Run the demo in live mode with writes still off:
+## Rehearse first
 
-```
+The scripted replay is written against the synthetic repository, so with the connector on, run in live
+mode, where the model reads the login from Jordan's record:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
 WARDEN_MODE=live python -m warden.api
 ```
 
-Start a run and let it reach the repository step. With writes off, the connector reports what it would
-remove without removing anything, so you can confirm it is targeting the right repo and the right login
-before anything happens. Check the test account is still a collaborator on GitHub afterward.
+Start a run and approve the account disable when asked. With writes off, the connector reports what it
+would remove without removing anything, the step is labeled a dry run, and the end-of-run check shows
+the test account still a collaborator. Confirm on GitHub that it is.
 
 ## The real run
 
-When the rehearsal looks right, set `WARDEN_GITHUB_ALLOW_WRITES=true` and run it again. This time the
-agent actually removes the test account from the repo. Flip to GitHub and confirm the collaborator is
-gone. That is the proof: the change is real and you can verify it outside the app.
+Set `WARDEN_GITHUB_ALLOW_WRITES=true`, restart, and run again. The agent removes the test account from
+the repo; the end-of-run check reads the collaborator list back and shows it gone, and you can confirm
+on GitHub.
 
-To prove the kill switch against the real system, start a run, let it remove the first access, then hit
-Revoke before the repository step. The test account stays a collaborator on GitHub, because the agent
-was stopped before it got there.
+To see the kill switch against the real system, invite the test account back, start a run, and press
+Revoke before the agent reaches the repository step. The account stays a collaborator.
 
 ## Turning it back off
 
-Delete the token when you are done, or just blank `WARDEN_GITHUB_TOKEN`. With no token the connector is
-not used at all and the synthetic tool takes over again.
+Delete the token when you're done, or unset `WARDEN_GITHUB_TOKEN`. With no token the connector isn't
+used and the synthetic tool takes over again.

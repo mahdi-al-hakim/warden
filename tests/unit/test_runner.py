@@ -74,8 +74,8 @@ async def test_revocation_before_the_run_stops_everything():
 
 
 async def test_revoke_during_approval_still_blocks_the_action():
-    # The reviewer's key case: a revoke that lands while a high-risk action waits for a human must
-    # block the action even if a human then approves it. The re-check after approval enforces this.
+    # A revoke that lands while a high-risk action waits for a human must block the action even if
+    # a human then approves it. The re-check after approval enforces this.
     events, emit = _collector()
     cp = build_control_plane(task=OFFBOARDING_TASK, emit=emit, approval_timeout_seconds=5.0)
     run = asyncio.create_task(
@@ -96,10 +96,10 @@ async def test_revoke_during_approval_still_blocks_the_action():
 
 
 async def test_revoke_during_an_in_flight_call_is_not_a_new_start():
-    # The subtle race a reviewer raised: a revoke that lands while a tool call is already in flight
-    # cannot recall it. The completed call must not be counted as a new action started after the
-    # revoke. The broker emits the commit marker before running, so the invariant keys off the
-    # commit (which came first), and the audit records the true order.
+    # A revoke that lands while a tool call is already in flight cannot recall it. The completed
+    # call must not be counted as a new action started after the revoke. The broker emits the commit
+    # marker before running, so the invariant keys off the commit (which came first), and the audit
+    # records the true order.
     events, emit = _collector()
     cp = build_control_plane(task=OFFBOARDING_TASK, emit=emit, approval_timeout_seconds=5.0)
     directory = cp.registry.get("directory")

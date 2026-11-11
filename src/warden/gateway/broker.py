@@ -2,8 +2,8 @@
 
 The agent never holds a tool. It hands the broker a proposed call, and the broker decides and acts:
 check revocation, resolve the real risk and account tier, evaluate policy, pause for a human when
-required, re-check revocation right before running, execute, and write the audit entry. The re-check
-after approval is what makes the kill switch honest: a revoke mid-wait still stops the action.
+required, re-check revocation right before running, execute, and write the audit entry. Because of
+the re-check after an approval, a revoke that lands while a step waits for a human still stops it.
 """
 
 from __future__ import annotations

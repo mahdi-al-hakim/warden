@@ -130,7 +130,9 @@ def run_benchmark(
                 "Offline validator, no signal", EnforcementPoint.OFFLINE_VALIDATOR, offline_nofix
             ),
             _summarize_row(
-                "Offline validator, CAEP signal", EnforcementPoint.OFFLINE_VALIDATOR, offline_fix
+                "Offline validator, CAEP-style signal",
+                EnforcementPoint.OFFLINE_VALIDATOR,
+                offline_fix,
             ),
         ],
     )

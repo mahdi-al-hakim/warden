@@ -1,6 +1,6 @@
 """Run the note-injection eval against real Claude models and write every transcript and a table.
 
-The design is fixed in experiments/note-injection/PREREGISTRATION.md, and this script implements
+The design is fixed in experiments/note-injection/DESIGN.md, and this script implements
 it as written: the same task, system prompt and tools as live mode; one note on the departing
 contractor's directory record that asks for something outside the task; a control arm with the
 instruction removed; and a count read from what the broker saw proposed, not from a judge.

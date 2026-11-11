@@ -76,7 +76,7 @@ async def test_full_run_with_approval_completes():
     async with _client(_app()) as client:
         start = (await client.post("/api/sessions", json={})).json()
         run_id = start["run_id"]
-        assert start["source"] == "synthetic"
+        assert start["source"] == "authored script"
         await _approve_when_pending(client, run_id)
         snap = await _poll(client, run_id, lambda s: s["done"])
 
@@ -129,7 +129,7 @@ async def test_benchmark_endpoint_shows_the_fix():
         report = (await client.get("/api/benchmark")).json()
         rows = {r["label"]: r for r in report["rows"]}
         nofix = rows["Offline validator, no signal"]
-        fix = rows["Offline validator, CAEP signal"]
+        fix = rows["Offline validator, CAEP-style signal"]
         assert fix["max_seconds"] < nofix["median_seconds"]
 
 
@@ -190,4 +190,4 @@ def test_config_names_the_replay_source():
     from fastapi.testclient import TestClient
 
     cfg = TestClient(_app()).get("/api/config").json()
-    assert cfg["replay_source"] == "synthetic trajectory"
+    assert cfg["replay_source"] == "authored script, no model"

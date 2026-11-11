@@ -27,10 +27,9 @@ def no_action_starts_after_revoke(events: list[StreamEvent], cp: ControlPlane) -
     """Once a revoke is triggered, the broker commits no further action.
 
     This keys off the commit marker the broker emits under the lock, right after the final
-    revocation re-check, not the post-completion executed event. The distinction matters: a call
-    already in flight to an external system when the revoke lands cannot be recalled, but no new
-    action is ever started after a revoke. Measuring the commit point, not the completion, is what
-    makes this the honest guarantee rather than a property the system can violate by racing.
+    revocation re-check, rather than the executed event that follows completion. A call already in
+    flight to an external system when the revoke lands can't be recalled and may finish afterwards;
+    what the broker guarantees is that no new action is started after a revoke.
     """
     revoked = False
     for event in events:

@@ -1,7 +1,8 @@
 """Runtime configuration, read from the environment with sensible defaults.
 
-Keeping this in one typed place means no module reads os.environ on its own, and a misconfigured
-deployment fails in an obvious way instead of halfway through a run.
+Most settings are read here, in one typed place, so a misconfigured deployment fails in an obvious
+way instead of halfway through a run. The GitHub connector reads its own WARDEN_GITHUB_* variables,
+and the API reads WARDEN_WEB_DIR.
 """
 
 from __future__ import annotations

@@ -27,7 +27,7 @@ def format_report(report: EvalReport) -> str:
             if not inv.passed:
                 lines.append(f"       - FAILED {inv.name}: {inv.detail}")
     lines.append("")
-    lines.append("Revocation benchmark (seconds from revoke to first denied action)")
+    lines.append("Revocation model, simulated clock (seconds from revoke to first denied action)")
     bench = report.benchmark
     lines.append(
         f"cache TTL {bench.cache_ttl_seconds:g}s, signal latency {bench.signal_latency_seconds:g}s"

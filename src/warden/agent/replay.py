@@ -114,7 +114,7 @@ class ReplayAgent:
         self,
         steps: list[AgentStep] | None = None,
         *,
-        source: str = "synthetic",
+        source: str = "authored script",
         meta: dict[str, Any] | None = None,
         step_delay_seconds: float = 0.0,
         summarize_finish: bool = True,
