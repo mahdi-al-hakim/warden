@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 
-from warden.agent import OFFBOARDING_TASK, ReplayAgent, run_session
+from warden.agent import OFFBOARDING_TASK, AgentError, AgentStep, ReplayAgent, run_session
 from warden.domain import ActionOutcome, EventType, SessionStatus
 from warden.eval.invariants import no_action_starts_after_revoke
 from warden.service import build_control_plane
@@ -320,3 +320,109 @@ async def test_finish_message_reflects_the_real_outcome_not_a_script():
     msg = completed[-1].data["message"]
     assert "left enabled" in msg and "disable was denied" in msg
     assert "the account was disabled after approval" not in msg
+
+
+class _BrokenAgent:
+    source = "test"
+
+    async def propose(self, task, history):
+        raise AgentError("the model declined to continue (cyber)")
+
+
+class _LoopingAgent:
+    source = "test"
+
+    async def propose(self, task, history):
+        return AgentStep(kind="tool", tool="directory", operation="lookup_user",
+                         arguments={"user_id": "jordan.lee"}, message="looking again")
+
+
+async def test_an_agent_error_ends_the_run_as_failed_with_the_reason():
+    events, emit = _collector()
+    cp = build_control_plane(task=OFFBOARDING_TASK, emit=emit)
+    session = await run_session(agent=_BrokenAgent(), broker=cp.broker, session=cp.session,
+                                task=OFFBOARDING_TASK, emit=emit, verify=cp.verify)
+    assert session.status is SessionStatus.FAILED
+    done = [e for e in events if e.type == EventType.SESSION_COMPLETED][-1]
+    assert done.data["failed"] is True
+    assert "declined" in done.data["message"]
+    assert done.data["verified"]["complete"] is False
+
+
+async def test_hitting_the_step_limit_is_a_failure_not_a_completion():
+    events, emit = _collector()
+    cp = build_control_plane(task=OFFBOARDING_TASK, emit=emit)
+    session = await run_session(agent=_LoopingAgent(), broker=cp.broker, session=cp.session,
+                                task=OFFBOARDING_TASK, emit=emit, max_steps=3)
+    assert session.status is SessionStatus.FAILED
+    done = [e for e in events if e.type == EventType.SESSION_COMPLETED][-1]
+    assert done.data["failed"] is True and "3-step limit" in done.data["message"]
+
+
+async def test_the_run_ends_with_the_control_planes_own_check_of_the_end_state():
+    events, emit = _collector()
+    cp = build_control_plane(task=OFFBOARDING_TASK, emit=emit, approval_timeout_seconds=5.0)
+    run = asyncio.create_task(
+        run_session(agent=ReplayAgent(), broker=cp.broker, session=cp.session,
+                    task=OFFBOARDING_TASK, emit=emit, verify=cp.verify)
+    )
+    cp.broker.resolve_approval(await _wait_for_pending(cp.broker), approved=True,
+                               approver="operator_dana")
+    await run
+    verified = [e for e in events if e.type == EventType.SESSION_COMPLETED][-1].data["verified"]
+    assert verified["complete"] is True
+    assert [c["id"] for c in verified["checks"]] == ["app_access", "vpn", "repo_access", "account"]
+    assert all(c["status"] == "done" for c in verified["checks"])
+
+
+async def test_verification_shows_what_the_agent_left_undone():
+    # An agent that revokes one app and declares victory: its message can say anything, but the
+    # control plane's check reports every step it skipped.
+    lazy = ReplayAgent(steps=[
+        AgentStep(kind="tool", tool="directory", operation="revoke_access",
+                  arguments={"user_id": "jordan.lee", "app": "crm"}, message="Revoking CRM."),
+        AgentStep(kind="finish", message="All done, Jordan is fully offboarded."),
+    ], summarize_finish=False)
+    events, emit = _collector()
+    cp = build_control_plane(task=OFFBOARDING_TASK, emit=emit)
+    await run_session(agent=lazy, broker=cp.broker, session=cp.session,
+                      task=OFFBOARDING_TASK, emit=emit, verify=cp.verify)
+    done = [e for e in events if e.type == EventType.SESSION_COMPLETED][-1]
+    assert done.data["message"] == "All done, Jordan is fully offboarded."
+    status = {c["id"]: c["status"] for c in done.data["verified"]["checks"]}
+    assert done.data["verified"]["complete"] is False
+    assert status == {"app_access": "not_done", "vpn": "not_done",
+                      "repo_access": "not_done", "account": "not_done"}
+
+
+async def test_removing_the_subjects_repository_login_is_in_scope_and_a_bystanders_is_not():
+    # People have a different identifier in each system. The directory links jordan.lee to the
+    # login jlee-contractor, so removing that login is acting on the subject; Dana's is not.
+    cp = build_control_plane(task=OFFBOARDING_TASK, subject="jordan.lee")
+    own = await cp.broker.handle_action(
+        session=cp.session, agent_id=cp.agent_id, tool="repo", operation="remove_member",
+        arguments={"repo": "payments-api", "user_id": "jlee-contractor"}, message="remove own",
+    )
+    other = await cp.broker.handle_action(
+        session=cp.session, agent_id=cp.agent_id, tool="repo", operation="remove_member",
+        arguments={"repo": "payments-api", "user_id": "dana-ortiz"}, message="remove bystander",
+    )
+    assert own.outcome is ActionOutcome.EXECUTED
+    assert other.outcome is ActionOutcome.DENIED
+    members = cp.registry.execute("repo", "list_members", {"repo": "payments-api"}).data["members"]
+    assert members == ["dana-ortiz"]
+
+
+async def test_a_privileged_persons_login_is_judged_as_that_person():
+    # Addressing the break-glass account by its repository login must not hide that it is
+    # privileged: the broker canonicalizes the login to the directory user before policy runs.
+    cp = build_control_plane(task=OFFBOARDING_TASK, subject="jordan.lee")
+    cp.registry.get("directory").link_github_login("security.breakglass", "breakglass-admin")
+    cp.registry.get("repo")._members["payments-api"].add("breakglass-admin")
+    result = await cp.broker.handle_action(
+        session=cp.session, agent_id=cp.agent_id, tool="repo", operation="remove_member",
+        arguments={"repo": "payments-api", "user_id": "breakglass-admin"}, message="remove",
+    )
+    assert result.outcome is ActionOutcome.DENIED
+    blocked = [e for e in cp.audit.events if e.kind == EventType.ACTION_BLOCKED]
+    assert blocked[-1].data["rule_id"] == "deny-writes-to-privileged-accounts"

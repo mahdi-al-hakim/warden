@@ -12,6 +12,12 @@ from typing import Any, Literal, Protocol, runtime_checkable
 from pydantic import BaseModel, Field
 
 
+class AgentError(RuntimeError):
+    """The agent could not produce a usable next step, for example because the model declined the
+    request or ran out of output tokens. The runner ends the run as failed with this reason, rather
+    than mistaking a broken turn for the agent deciding it was done."""
+
+
 class AgentStep(BaseModel):
     """One move the agent wants to make: call a tool, or stop."""
 

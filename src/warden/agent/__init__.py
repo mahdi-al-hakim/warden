@@ -1,6 +1,6 @@
 """Agent adapters and the governed runner. The live adapter loads from .claude on demand."""
 
-from .base import AgentAdapter, AgentStep
+from .base import AgentAdapter, AgentError, AgentStep
 from .replay import (
     OFFBOARDING_TASK,
     OFFBOARDING_TRAJECTORY,
@@ -14,6 +14,7 @@ __all__ = [
     "OFFBOARDING_TASK",
     "OFFBOARDING_TRAJECTORY",
     "AgentAdapter",
+    "AgentError",
     "AgentStep",
     "ReplayAgent",
     "load_trajectory",

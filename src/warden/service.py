@@ -22,6 +22,7 @@ from .revocation import (
     SignalReceiver,
 )
 from .tools import ToolRegistry
+from .verify import verify_offboarding
 
 Emit = Callable[[StreamEvent], None]
 Clock = Callable[[], float]
@@ -42,6 +43,10 @@ class ControlPlane:
     session: Session
     agent_id: str
 
+    def verify(self) -> dict:
+        """The control plane's own check of the end state, for the run's subject."""
+        return verify_offboarding(self.registry, self.session.subject or "")
+
 
 def build_control_plane(
     *,
@@ -58,6 +63,7 @@ def build_control_plane(
 ) -> ControlPlane:
     """Build a ready-to-run control plane. `fix_enabled` toggles the CAEP/SSF receiver on or off."""
     registry = ToolRegistry()
+    _link_subject_login(registry, subject)
     policy = PolicyEngine()
     audit = AuditLog()
     authority = RevocationAuthority(clock=clock)
@@ -94,3 +100,20 @@ def build_control_plane(
         session=session,
         agent_id=agent_id,
     )
+
+
+def _link_subject_login(registry: ToolRegistry, subject: str | None) -> None:
+    """With the real GitHub connector, point the subject's directory record at the test login.
+
+    The connector may only remove logins on its test allowlist, and the setup guide has you create
+    one test account to play the departing contractor, so that login is the subject's identity on
+    GitHub. Linking it lets the agent find it and lets the scope check accept it.
+    """
+    from .tools.github_ops import GitHubTool
+
+    repo, directory = registry.get("repo"), registry.get("directory")
+    if not subject or not isinstance(repo, GitHubTool) or directory is None:
+        return
+    logins = sorted(repo.test_logins)
+    if logins and hasattr(directory, "link_github_login"):
+        directory.link_github_login(subject, logins[0])

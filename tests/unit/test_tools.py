@@ -68,6 +68,7 @@ def test_anthropic_tool_schemas_cover_every_operation():
         "directory__disable_account",
         "vpn__status",
         "vpn__disable",
+        "repo__list_repos",
         "repo__list_members",
         "repo__remove_member",
     }

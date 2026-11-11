@@ -122,11 +122,16 @@ function applyEffect(step) {
       markResource("analytics", "Revoked", "revoked");
     if (operation === "revoke_access" && args.app === "wiki") markResource("wiki", "Revoked", "revoked");
     if (operation === "disable" && step.tool === "vpn") markResource("vpn", "Off", "revoked");
-    if (operation === "remove_member") markResource("repo", "Removed", "revoked");
+    if (operation === "remove_member") {
+      const r = step.result || {};
+      if (r.dry_run) markResource("repo", "Dry run", "pending");
+      else if (r.removed === null) markResource("repo", "Not a member", "pending");
+      else markResource("repo", "Removed", "revoked");
+    }
     if (operation === "disable_account" && args.user_id === "jordan.lee")
       markResource("account", "Disabled", "revoked");
   }
-  if (outcome === "denied" && operation === "disable_account" && args.user_id === "security.breakglass") {
+  if (outcome === "denied" && args.user_id === "security.breakglass") {
     markResource("breakglass", "Blocked", "protected");
   }
 }
@@ -183,9 +188,17 @@ function onDecision(d) {
 
 function onExecuted(d) {
   const step = upsertStep(d.action_id);
+  step.result = d.result || {};
+  if (step.operation === "lookup_user" && step.result.notes) {
+    // Record text, which in live mode reaches the model as data, so textContent only.
+    const note = document.createElement("div");
+    note.className = "step-note";
+    note.textContent = `Note on ${step.args.user_id || "the record"}: ${step.result.notes}`;
+    step.el.appendChild(note);
+  }
   if (d.ok) addTag(step, "tag-done", "done");
   else addTag(step, "tag-failed", "tool failed");
-  applyEffect({ ...step, outcome: "executed" });
+  applyEffect({ ...step, outcome: d.ok ? "executed" : "failed" });
   clearApprovalIf(d.action_id);
 }
 
@@ -269,13 +282,95 @@ function handleEvent(event) {
       state.pendingActionId = null;
       dom.approvalCard.hidden = true;
       break;
-    case "session.completed":
-      finishRun(d.revoked ? "revoked" : "completed", d.revoked ? "Revoked" : "Completed");
-      break;
+    case "session.completed": onCompleted(d); break;
     case "error":
-      finishRun("revoked", "Error");
+      addSummary("Run failed", d.message || "The run failed.");
+      finishRun("failed", "Error");
       break;
     default: break;
+  }
+}
+
+// End of run --------------------------------------------------------------
+
+function onCompleted(d) {
+  const title = d.failed || d.revoked ? "Run stopped" : "Agent's summary";
+  if (d.message) addSummary(title, d.message);
+  if (d.verified) {
+    renderVerified(d.verified);
+    reconcileResources(d.verified);
+  }
+  if (d.failed) finishRun("failed", "Failed");
+  else if (d.revoked) finishRun("revoked", "Revoked");
+  else if (d.verified && !d.verified.complete) finishRun("incomplete", "Incomplete");
+  else finishRun("completed", "Completed");
+}
+
+// Model text, so built with textContent. Bold markers are dropped for display; nothing else is.
+function addSummary(title, text) {
+  const li = document.createElement("li");
+  li.className = "step step-summary";
+  const head = document.createElement("div");
+  head.className = "summary-title";
+  head.textContent = title;
+  const body = document.createElement("p");
+  body.className = "summary-text";
+  body.textContent = String(text).replace(/\*\*(.+?)\*\*/g, "$1");
+  li.append(head, body);
+  dom.timeline.appendChild(li);
+  dom.timeline.scrollTop = dom.timeline.scrollHeight;
+}
+
+const CHECK_MARKS = { done: "done", not_done: "not done", unknown: "unknown" };
+
+function renderVerified(v) {
+  const li = document.createElement("li");
+  li.className = "step step-verified";
+  li.dataset.complete = v.complete ? "yes" : "no";
+  const done = v.checks.filter((c) => c.status === "done").length;
+  const head = document.createElement("div");
+  head.className = "summary-title";
+  head.textContent = `Read back from the systems: ${done} of ${v.checks.length} steps done`;
+  const list = document.createElement("ul");
+  list.className = "checks";
+  for (const c of v.checks) {
+    const item = document.createElement("li");
+    item.dataset.status = c.status;
+    const mark = document.createElement("span");
+    mark.className = "check-mark";
+    mark.textContent = CHECK_MARKS[c.status] || c.status;
+    const label = document.createElement("span");
+    label.textContent = c.detail ? `${c.label}: ${c.detail}` : c.label;
+    item.append(mark, label);
+    list.appendChild(item);
+  }
+  li.append(head, list);
+  dom.timeline.appendChild(li);
+  dom.timeline.scrollTop = dom.timeline.scrollHeight;
+}
+
+// The access panel ends on what the systems report, not on what the steps implied.
+function reconcileResources(v) {
+  const byId = Object.fromEntries(v.checks.map((c) => [c.id, c]));
+  const apps = byId.app_access;
+  if (apps && apps.status !== "unknown") {
+    const left = apps.remaining || [];
+    for (const app of ["crm", "analytics", "wiki"]) {
+      if (left.includes(app)) markResource(app, "Active", "active");
+      else markResource(app, "Revoked", "revoked");
+    }
+  }
+  const finals = {
+    vpn: ["vpn", "Off", "Active"],
+    repo_access: ["repo", "Removed", "Still a member"],
+    account: ["account", "Disabled", "Active"],
+  };
+  for (const [checkId, [resId, doneLabel, openLabel]] of Object.entries(finals)) {
+    const c = byId[checkId];
+    if (!c) continue;
+    if (c.status === "done") markResource(resId, doneLabel, "revoked");
+    else if (c.status === "not_done") markResource(resId, openLabel, "active");
+    else markResource(resId, "Unknown", "pending");
   }
 }
 

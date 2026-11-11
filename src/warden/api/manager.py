@@ -86,6 +86,7 @@ class SessionManager:
                 client=self._client,
                 tool_schemas=cp.registry.anthropic_tool_schemas(),
                 model=self._settings.model,
+                effort=self._settings.effort,
             )
         if self._settings.trajectory_path:
             # Replay a recorded run (for example one captured from a real model), so the demo can
@@ -127,6 +128,7 @@ class SessionManager:
                 session=handle.cp.session,
                 task=OFFBOARDING_TASK,
                 emit=handle.emit,
+                verify=handle.cp.verify,
             )
         except Exception as exc:  # never let a run crash the server; surface it on the stream
             handle.emit(

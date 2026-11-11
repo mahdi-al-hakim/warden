@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import httpx
 
+from warden.domain import ActionOutcome
+from warden.service import build_control_plane
 from warden.tools.github_ops import GitHubConfig, GitHubTool
 
 
@@ -92,3 +94,36 @@ def test_from_env_is_none_without_a_token(monkeypatch):
     monkeypatch.delenv("WARDEN_GITHUB_TOKEN", raising=False)
     monkeypatch.delenv("WARDEN_GITHUB_ORG", raising=False)
     assert GitHubConfig.from_env() is None
+
+
+def test_list_repos_reports_the_configured_scope_without_calling_github():
+    tool, seen = _tool(lambda request: httpx.Response(500))
+    result = tool.run("list_repos", {})
+    assert result.ok is True
+    assert result.data == {"repos": ["payments-api"]}
+    assert seen == []
+
+
+async def test_the_subjects_test_login_is_linked_and_in_scope(monkeypatch):
+    # With the connector configured, the departing contractor's directory record points at the
+    # test login, so the scope check accepts removing it and still refuses anyone else. Writes
+    # are off, so the removal is a dry run and nothing reaches the network.
+    monkeypatch.setenv("WARDEN_GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("WARDEN_GITHUB_ORG", "throwaway-org")
+    monkeypatch.setenv("WARDEN_GITHUB_REPOS", "payments-api")
+    monkeypatch.setenv("WARDEN_GITHUB_TEST_LOGINS", "contractor-test")
+    monkeypatch.setenv("WARDEN_GITHUB_ALLOW_WRITES", "false")
+    cp = build_control_plane(task="offboard", subject="jordan.lee")
+    assert "contractor-test" in cp.registry.identities_of("jordan.lee")
+
+    own = await cp.broker.handle_action(
+        session=cp.session, agent_id=cp.agent_id, tool="repo", operation="remove_member",
+        arguments={"repo": "payments-api", "user_id": "contractor-test"}, message="remove",
+    )
+    other = await cp.broker.handle_action(
+        session=cp.session, agent_id=cp.agent_id, tool="repo", operation="remove_member",
+        arguments={"repo": "payments-api", "user_id": "real-employee"}, message="remove",
+    )
+    assert own.outcome is ActionOutcome.EXECUTED
+    assert own.result.data["dry_run"] is True
+    assert other.outcome is ActionOutcome.DENIED

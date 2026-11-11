@@ -16,7 +16,10 @@ class Settings(BaseModel):
 
     mode: str = "replay"
     anthropic_api_key: str | None = None
-    model: str = "claude-haiku-4-5-20251001"
+    model: str = "claude-haiku-5-5"
+    # Thinking effort for live mode (low, medium, high, ...). Unset sends nothing, so models
+    # that do not take the parameter still work.
+    effort: str | None = None
     # A recorded trajectory to replay instead of the built-in synthetic one. Set this to a run you
     # captured from a real model (scripts/record_trajectory.py) so the demo plays back a real run.
     trajectory_path: str | None = None
@@ -31,7 +34,8 @@ class Settings(BaseModel):
         return cls(
             mode=os.getenv("WARDEN_MODE", "replay").strip().lower(),
             anthropic_api_key=(os.getenv("ANTHROPIC_API_KEY") or "").strip() or None,
-            model=os.getenv("WARDEN_MODEL", "claude-haiku-4-5-20251001").strip(),
+            model=os.getenv("WARDEN_MODEL", "claude-haiku-5-5").strip(),
+            effort=(os.getenv("WARDEN_EFFORT") or "").strip().lower() or None,
             trajectory_path=(os.getenv("WARDEN_TRAJECTORY") or "").strip() or None,
             approval_timeout_seconds=float(os.getenv("WARDEN_APPROVAL_TIMEOUT_SECONDS", "120")),
             demo_step_delay_seconds=float(os.getenv("WARDEN_STEP_DELAY_SECONDS", "0.6")),

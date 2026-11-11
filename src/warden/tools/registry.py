@@ -62,6 +62,13 @@ class ToolRegistry:
                 error=f"the {tool}.{operation} tool raised {exc.__class__.__name__}: {exc}",
             )
 
+    def identities_of(self, user_id: str) -> set[str]:
+        """Every identifier that names this person across systems (directory id, logins)."""
+        directory = self._tools.get("directory")
+        if directory is None or not hasattr(directory, "identities"):
+            return {user_id}
+        return directory.identities(user_id)
+
     def resolve_account_tier(self, arguments: dict[str, Any]) -> str | None:
         """Look up the target user's tier from the directory, so policy sees the real tier."""
         directory = self._tools.get("directory")

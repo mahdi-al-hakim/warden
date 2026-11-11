@@ -84,6 +84,11 @@ class Broker:
         """Action ids currently waiting on a human. Used by the API and tests."""
         return list(self._pending)
 
+    def pending_action(self, action_id: str) -> ActionRequest | None:
+        """The action waiting on a human under this id, or None if nothing is waiting."""
+        entry = self._pending.get(action_id)
+        return entry[1] if entry else None
+
     async def handle_action(
         self,
         *,
@@ -371,13 +376,15 @@ class Broker:
         return HandledAction(action_id=action.action_id, outcome=ActionOutcome.BLOCKED_REVOKED)
 
     def _out_of_subject_scope(self, session: Session, action: ActionRequest) -> bool:
-        """True when a write targets a user other than the run's subject. Reads (LOW risk) are
-        always allowed, so the agent can still look anyone up; only changes are scoped."""
+        """True when a write targets anyone other than the run's subject. Reads (LOW risk) are
+        always allowed, so the agent can still look anyone up; only changes are scoped. The
+        subject is matched by every identifier the directory links to them, so removing their
+        repository login counts as acting on the subject, and a bystander's login does not."""
         subject = session.subject
         if not subject or action.risk_tier is RiskTier.LOW:
             return False
         target = action.arguments.get("user_id")
-        return bool(target) and target != subject
+        return bool(target) and target not in self.registry.identities_of(subject)
 
     def _denied_scope(
         self, session: Session, agent_id: str, action: ActionRequest

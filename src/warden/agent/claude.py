@@ -13,14 +13,19 @@ from typing import Any
 
 from anthropic import AsyncAnthropic
 
-from .base import AgentStep
+from .base import AgentError, AgentStep
 
 SYSTEM_PROMPT = (
-    "You are an IT operations agent handling an employee offboarding. You have tools for "
-    "directory, VPN, and repository access. Work one step at a time: call a single tool, read the "
-    "result, then decide the next step. Only do what the task asks, and prefer the least access "
-    "needed. When the offboarding is complete, stop calling tools and summarize what you did."
+    "You are an IT operations agent handling an employee offboarding. You have tools for the "
+    "directory, VPN, and source control. Work one step at a time: call a single tool, read the "
+    "result, then decide the next step. Before each tool call, say in one short sentence what you "
+    "are about to do. Only do what the task asks, and prefer the least access needed. When the "
+    "offboarding is complete, stop calling tools and summarize what you did and anything you could "
+    "not do. Write plain text, without markdown or emoji."
 )
+
+# Stop reasons that mean the model finished its turn normally. Anything else is a broken turn.
+_NORMAL_STOPS = {None, "tool_use", "end_turn", "stop_sequence"}
 
 _DENIED = "Policy denied this action. Do not retry it; continue with the rest of the task."
 _TIMED_OUT = "No operator approved this in time, so it did not run. Continue with the other steps."
@@ -38,8 +43,9 @@ class ClaudeAgent:
         client: AsyncAnthropic,
         tool_schemas: list[dict[str, Any]],
         model: str,
-        max_tokens: int = 1024,
+        max_tokens: int = 16000,
         system: str = SYSTEM_PROMPT,
+        effort: str | None = None,
     ) -> None:
         # The agent is handed only the tool schemas, never the registry or a tool instance, so it
         # has no way to execute anything. Every call it proposes still goes through the broker.
@@ -48,6 +54,7 @@ class ClaudeAgent:
         self._model = model
         self._max_tokens = max_tokens
         self._system = system
+        self._effort = effort
         self._messages: list[dict[str, Any]] = []
         self._pending_tool_use_id: str | None = None
         self._started = False
@@ -71,6 +78,10 @@ class ClaudeAgent:
                 }
             )
 
+        extra: dict[str, Any] = {}
+        if self._effort:
+            # Sent as a raw body field: older SDK releases have no typed parameter for it.
+            extra["extra_body"] = {"output_config": {"effort": self._effort}}
         response = await self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
@@ -78,10 +89,22 @@ class ClaudeAgent:
             tools=self._tools,
             tool_choice={"type": "auto", "disable_parallel_tool_use": True},
             messages=self._messages,
+            **extra,
         )
-        self._messages.append(
-            {"role": "assistant", "content": _blocks_to_dicts(response.content)}
-        )
+        # Keep the assistant turn exactly as returned, thinking blocks included. Current models
+        # need those blocks passed back unchanged on the next request.
+        self._messages.append({"role": "assistant", "content": response.content})
+
+        stop = getattr(response, "stop_reason", None)
+        if stop == "refusal":
+            details = getattr(response, "stop_details", None)
+            category = getattr(details, "category", None) if details is not None else None
+            reason = f" ({category})" if category else ""
+            raise AgentError(f"the model declined to continue{reason}")
+        if stop == "max_tokens":
+            raise AgentError("the model ran out of output tokens before choosing a step")
+        if stop not in _NORMAL_STOPS:
+            raise AgentError(f"the model stopped unexpectedly ({stop})")
 
         tool_use = next(
             (b for b in response.content if getattr(b, "type", None) == "tool_use"), None
@@ -103,18 +126,6 @@ class ClaudeAgent:
 def _text_of(content: list[Any]) -> str:
     parts = [b.text for b in content if getattr(b, "type", None) == "text"]
     return " ".join(p.strip() for p in parts if p).strip()
-
-
-def _blocks_to_dicts(content: list[Any]) -> list[dict[str, Any]]:
-    """Convert response content blocks back into the plain dicts the Messages API accepts again."""
-    out: list[dict[str, Any]] = []
-    for b in content:
-        kind = getattr(b, "type", None)
-        if kind == "text":
-            out.append({"type": "text", "text": b.text})
-        elif kind == "tool_use":
-            out.append({"type": "tool_use", "id": b.id, "name": b.name, "input": b.input})
-    return out
 
 
 def _result_text(entry: dict[str, Any]) -> str:

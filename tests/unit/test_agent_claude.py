@@ -11,6 +11,9 @@ import copy
 from dataclasses import dataclass, field
 from typing import Any
 
+import pytest
+
+from warden.agent import AgentError
 from warden.agent.claude import ClaudeAgent
 from warden.tools import ToolRegistry
 
@@ -30,9 +33,22 @@ class _ToolUse:
 
 
 @dataclass
+class _Thinking:
+    thinking: str
+    signature: str
+    type: str = "thinking"
+
+
+@dataclass
+class _StopDetails:
+    category: str | None = None
+
+
+@dataclass
 class _Response:
     content: list[Any]
     stop_reason: str = "tool_use"
+    stop_details: Any = None
 
 
 @dataclass
@@ -122,3 +138,47 @@ async def test_denied_outcome_is_reported_to_the_model():
 
     block = client.messages.calls[1]["messages"][-1]["content"][0]
     assert "denied" in block["content"].lower()
+
+
+async def test_thinking_blocks_go_back_to_the_model_unchanged():
+    # Current models need the assistant turn passed back exactly as returned, thinking included.
+    thinking = _Thinking(thinking="", signature="sig-abc")
+    scripted = [
+        _Response(content=[thinking, _ToolUse(id="tu_1", name="directory__lookup_user",
+                                               input={"user_id": "jordan.lee"})]),
+        _Response(content=[_Text("Done.")], stop_reason="end_turn"),
+    ]
+    agent, client = _agent(scripted)
+    await agent.propose("task", [])
+    history = [{"tool": "directory", "operation": "lookup_user", "outcome": "executed",
+                "result": {}, "error": None}]
+    await agent.propose("task", history)
+
+    assistant_turn = client.messages.calls[1]["messages"][1]
+    assert assistant_turn["role"] == "assistant"
+    assert assistant_turn["content"][0] == thinking
+    assert assistant_turn["content"][1].type == "tool_use"
+
+
+async def test_a_refusal_is_an_error_not_a_finish():
+    scripted = [_Response(content=[], stop_reason="refusal",
+                          stop_details=_StopDetails(category="cyber"))]
+    agent, _ = _agent(scripted)
+    with pytest.raises(AgentError, match=r"declined to continue \(cyber\)"):
+        await agent.propose("task", [])
+
+
+async def test_running_out_of_tokens_is_not_mistaken_for_finishing():
+    # Thinking counts against max_tokens. A truncated turn with no tool call must not end the run
+    # as if the agent had decided it was done.
+    scripted = [_Response(content=[_Text("I will now remove the")], stop_reason="max_tokens")]
+    agent, _ = _agent(scripted)
+    with pytest.raises(AgentError, match="ran out of output tokens"):
+        await agent.propose("task", [])
+
+
+async def test_an_unexpected_stop_reason_is_an_error():
+    scripted = [_Response(content=[], stop_reason="model_context_window_exceeded")]
+    agent, _ = _agent(scripted)
+    with pytest.raises(AgentError, match="stopped unexpectedly"):
+        await agent.propose("task", [])

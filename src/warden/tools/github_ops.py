@@ -85,12 +85,16 @@ class GitHubTool(Tool):
             timeout=10.0,
         )
         self.operations = {
+            "list_repos": Operation(
+                "list_repos", RiskTier.LOW, "List the repositories this connector may act on.",
+            ),
             "list_members": Operation(
                 "list_members", RiskTier.LOW, "Read the collaborators on a repository.",
                 {"repo": {"type": "string"}}, ("repo",),
             ),
             "remove_member": Operation(
-                "remove_member", RiskTier.MEDIUM, "Remove a collaborator from a repository.",
+                "remove_member", RiskTier.MEDIUM,
+                "Remove a collaborator from a repository. user_id is the collaborator's login.",
                 {"repo": {"type": "string"}, "user_id": {"type": "string"}}, ("repo", "user_id"),
             ),
         }
@@ -100,11 +104,19 @@ class GitHubTool(Tool):
         if failed is not None:
             return failed
         repo = str(arguments.get("repo", ""))
+        if operation == "list_repos":
+            # The configured scope, not the whole org: these are the only repos it will touch.
+            return ToolResult(ok=True, data={"repos": sorted(self._config.repos)})
         if operation == "list_members":
             return self._list_members(repo)
         if operation == "remove_member":
             return self._remove_member(repo, str(arguments.get("user_id", "")))
         return self.unknown_operation(operation)
+
+    @property
+    def test_logins(self) -> frozenset[str]:
+        """The logins this connector is allowed to remove, used to link the subject's login."""
+        return self._config.test_logins
 
     def _in_scope(self, repo: str) -> bool:
         # An empty repo allowlist means no repo is in scope, which fails safe.

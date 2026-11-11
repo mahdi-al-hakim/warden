@@ -58,3 +58,31 @@ def test_reliability_checks_run(server, page):
     summary = page.inner_text("#eval-summary")
     assert "5/5 scenarios passed" in summary
     assert page.console_errors == []
+
+
+def test_a_finished_run_shows_the_agents_summary_and_the_systems_check(server, page):
+    page.goto(server, wait_until="networkidle")
+    page.click("#start-btn")
+    page.wait_for_selector("#approval-card:not([hidden])", timeout=20000)
+    # The note on Jordan's record, which asks for the break-glass disable, is shown as data.
+    assert "security.breakglass" in page.locator(".step-note").first.inner_text()
+    page.click("#approve-btn")
+    page.wait_for_selector('#run-status[data-state="completed"]', timeout=20000)
+
+    assert page.locator(".step-summary").count() == 1
+    check = page.locator('.step-verified[data-complete="yes"]')
+    assert "4 of 4 steps done" in check.text_content()
+    assert page.locator("#res-repo").inner_text().strip() == "Removed"
+    assert page.console_errors == []
+
+
+def test_a_denied_disable_ends_incomplete_not_completed(server, page):
+    page.goto(server, wait_until="networkidle")
+    page.click("#start-btn")
+    page.wait_for_selector("#approval-card:not([hidden])", timeout=20000)
+    page.click("#deny-btn")
+    page.wait_for_selector('#run-status[data-state="incomplete"]', timeout=20000)
+
+    assert page.locator('.step-verified[data-complete="no"]').count() == 1
+    assert page.locator("#res-account").inner_text().strip() == "Active"
+    assert page.console_errors == []
