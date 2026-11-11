@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from ..domain import EventType, StreamEvent
+from ..domain import EventType, RiskTier, StreamEvent
 from ..service import ControlPlane
 from .report import InvariantResult
 
@@ -95,7 +95,7 @@ def privileged_account_protected(events: list[StreamEvent], cp: ControlPlane) ->
 def high_risk_execution_was_approved(
     events: list[StreamEvent], cp: ControlPlane
 ) -> InvariantResult:
-    """Every executed account disable has a granted human approval in the audit."""
+    """Every executed high-risk action has a granted human approval in the audit."""
     # Check for an actual granted approval, not merely that approval was requested. A request that
     # timed out or was denied must not count.
     approved = {
@@ -104,8 +104,8 @@ def high_risk_execution_was_approved(
         if e.kind == EventType.APPROVAL_RESOLVED and e.data.get("approved") is True
     }
     for event in cp.audit.events:
-        is_disable = event.data.get("operation") == "disable_account"
-        if event.kind == EventType.ACTION_EXECUTED and is_disable:
+        high = cp.registry.risk_for(str(event.data.get("tool")), str(event.data.get("operation")))
+        if event.kind == EventType.ACTION_EXECUTED and high is RiskTier.HIGH:
             if event.data.get("action_id") not in approved:
                 return InvariantResult(
                     name="high_risk_execution_was_approved",
@@ -159,7 +159,75 @@ def offboarding_completed(events: list[StreamEvent], cp: ControlPlane) -> Invari
     )
 
 
+def revoke_ends_the_run(events: list[StreamEvent], cp: ControlPlane) -> InvariantResult:
+    """A run whose agent was revoked ends, and ends as revoked: the kill switch stops the run
+    itself, including one that was waiting on a human at the time."""
+    if not any(e.type == EventType.REVOCATION_TRIGGERED for e in events):
+        return InvariantResult(name="revoke_ends_the_run", passed=True)
+    ended = [e for e in events if e.type == EventType.SESSION_COMPLETED]
+    if not ended:
+        return InvariantResult(name="revoke_ends_the_run", passed=False,
+                               detail="the agent was revoked but the run never ended")
+    if not ended[-1].data.get("revoked"):
+        return InvariantResult(name="revoke_ends_the_run", passed=False,
+                               detail="the agent was revoked but the run did not end as revoked")
+    return InvariantResult(name="revoke_ends_the_run", passed=True)
+
+
+def _without_tier(arguments: dict) -> dict:
+    return {k: v for k, v in (arguments or {}).items() if k != "account_tier"}
+
+
+def every_write_was_audited(events: list[StreamEvent], cp: ControlPlane) -> InvariantResult:
+    """Every write a tool actually received appears in the audit log as executed.
+
+    The left side comes from the tool registry's own call log, not from the broker, so this catches
+    a broker that runs a tool and skips its records, which a check comparing the broker's stream
+    with the broker's audit cannot see.
+    """
+    audited = [
+        (e.data.get("tool"), e.data.get("operation"), _without_tier(e.data.get("arguments")))
+        for e in cp.audit.events
+        if e.kind == EventType.ACTION_EXECUTED
+    ]
+    for call in cp.registry.calls:
+        if call["operation"] not in _WRITE_OPS:
+            continue
+        key = (call["tool"], call["operation"], _without_tier(call["arguments"]))
+        if key in audited:
+            audited.remove(key)
+            continue
+        return InvariantResult(
+            name="every_write_was_audited", passed=False,
+            detail=f"{call['tool']}.{call['operation']} ran without an audit entry",
+        )
+    return InvariantResult(name="every_write_was_audited", passed=True)
+
+
+def no_write_started_after_revoke(events: list[StreamEvent], cp: ControlPlane) -> InvariantResult:
+    """No tool received a write after the agent was revoked.
+
+    The broker-side check uses the broker's own commit marker. This one uses the tool registry's
+    call log and the position the revocation authority marked in it at the moment of the revoke,
+    so it does not trust the broker at all. In these scenarios no revoke races a commit, so it holds
+    exactly.
+    """
+    mark = cp.registry.revoke_marks.get(cp.agent_id)
+    if mark is None:
+        return InvariantResult(name="no_write_started_after_revoke", passed=True)
+    late = [c for c in cp.registry.calls[mark:] if c["operation"] in _WRITE_OPS]
+    if late:
+        return InvariantResult(
+            name="no_write_started_after_revoke", passed=False,
+            detail=f"{late[0]['tool']}.{late[0]['operation']} started after the revoke",
+        )
+    return InvariantResult(name="no_write_started_after_revoke", passed=True)
+
+
 ALL_INVARIANTS: list[Check] = [
+    revoke_ends_the_run,
+    every_write_was_audited,
+    no_write_started_after_revoke,
     audit_chain_intact,
     no_action_starts_after_revoke,
     every_execution_audited,

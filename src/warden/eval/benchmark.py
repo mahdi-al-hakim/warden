@@ -22,16 +22,20 @@ from .report import BenchmarkReport, BenchmarkRow
 
 
 class _FakeClock:
-    """A clock that moves only when sleep advances it, so each measurement is exact and instant."""
+    """A clock that moves only when sleep advances it, so each measurement is exact and instant.
+
+    It counts whole microseconds, so stepping it in 0.01 s increments does not accumulate the float
+    rounding that would otherwise register a stop one step late.
+    """
 
     def __init__(self) -> None:
-        self.t = 0.0
+        self._us = 0
 
     def __call__(self) -> float:
-        return self.t
+        return self._us / 1_000_000
 
     def advance(self, dt: float) -> None:
-        self.t += dt
+        self._us += round(dt * 1_000_000)
 
 
 def _percentile(ordered: list[float], pct: float) -> float:

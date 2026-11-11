@@ -84,6 +84,8 @@ class DirectoryTool(Tool):
         The broker canonicalizes every target through this before it resolves tier or scope, so a
         write addressed by login is judged as a write on the person it belongs to.
         """
+        if not isinstance(identifier, str):
+            return None
         if identifier in self._users:
             return identifier
         for user_id, user in self._users.items():
@@ -93,9 +95,9 @@ class DirectoryTool(Tool):
 
     def identities(self, user_id: str) -> set[str]:
         """Every identifier that names this person: the directory id plus any linked login."""
-        user = self._users.get(user_id)
+        user = self._users.get(user_id) if isinstance(user_id, str) else None
         if user is None:
-            return {user_id}
+            return {user_id} if isinstance(user_id, str) else set()
         login = user.get("github_login")
         return {user_id, login} if login else {user_id}
 

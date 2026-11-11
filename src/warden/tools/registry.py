@@ -6,6 +6,8 @@ typo or an invented call fails safe into approval or denial instead of slipping 
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from typing import Any
 
 from ..domain import RiskTier, ToolResult
@@ -34,6 +36,36 @@ class ToolRegistry:
         if tools is None:
             tools = [DirectoryTool(), VpnTool(), _repo_tool()]
         self._tools: dict[str, Tool] = {t.name: t for t in tools}
+        # Every call any tool actually receives, logged by the registry itself rather than by the
+        # broker. The eval checks the broker's own records against this, so a broker that ran a
+        # tool without recording it is caught.
+        self.calls: list[dict[str, Any]] = []
+        self.clock: Callable[[], float] = time.monotonic
+        # For each revoked agent, how many calls had been logged when the revoke landed. Any call
+        # at or past that position came after it; positions are exact where clocks can tie.
+        self.revoke_marks: dict[str, int] = {}
+        for tool in self._tools.values():
+            self._log_calls(tool)
+
+    def mark_revoke(self, agent_id: str) -> None:
+        self.revoke_marks.setdefault(agent_id, len(self.calls))
+
+    def _log_calls(self, tool: Tool) -> None:
+        inner = tool.run
+
+        def run(operation: str, arguments: dict[str, Any]) -> ToolResult:
+            self.calls.append({"tool": tool.name, "operation": operation,
+                               "arguments": dict(arguments) if isinstance(arguments, dict) else {},
+                               "at": self.clock()})
+            return inner(operation, arguments)
+
+        tool.run = run  # type: ignore[method-assign]
+
+    @classmethod
+    def synthetic(cls) -> ToolRegistry:
+        """Only the synthetic tools, whatever the environment says. The eval uses this, so a
+        GitHub token exported for a demo can never send an eval run to a real org."""
+        return cls([DirectoryTool(), VpnTool(), RepoTool()])
 
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)
@@ -61,6 +93,26 @@ class ToolRegistry:
                 ok=False,
                 error=f"the {tool}.{operation} tool raised {exc.__class__.__name__}: {exc}",
             )
+
+    def argument_problem(self, tool: str, operation: str, arguments: Any) -> str | None:
+        """A description of what is wrong with the arguments, or None if they fit the operation.
+
+        Unknown tools and operations are left to risk and policy, which deny them by default.
+        """
+        found = self._tools.get(tool)
+        if found is None or operation not in found.operations:
+            return None
+        if not isinstance(arguments, dict) or not all(isinstance(k, str) for k in arguments):
+            return "arguments must be an object with string keys"
+        op = found.operations[operation]
+        for name in op.required:
+            if name not in arguments:
+                return f"missing required argument {name!r}"
+        for name, spec in op.parameters.items():
+            if name in arguments and spec.get("type") == "string":
+                if not isinstance(arguments[name], str):
+                    return f"{name!r} must be a string"
+        return None
 
     def identities_of(self, user_id: str) -> set[str]:
         """Every identifier that names this person across systems (directory id, logins)."""

@@ -182,3 +182,20 @@ async def test_an_unexpected_stop_reason_is_an_error():
     agent, _ = _agent(scripted)
     with pytest.raises(AgentError, match="stopped unexpectedly"):
         await agent.propose("task", [])
+
+
+async def test_a_refused_step_reaches_the_model_as_an_error_with_the_reason():
+    scripted = [
+        _Response(content=[_ToolUse(id="tu_1", name="directory__disable_account",
+                                    input={"user_id": "dana.ops"})]),
+        _Response(content=[_Text("Understood.")], stop_reason="end_turn"),
+    ]
+    agent, client = _agent(scripted)
+    await agent.propose("task", [])
+    history = [{"tool": "directory", "operation": "disable_account", "outcome": "denied",
+                "result": None, "error": None,
+                "reason": "'dana.ops' is outside this run's offboarding scope."}]
+    await agent.propose("task", history)
+    block = client.messages.calls[1]["messages"][-1]["content"][0]
+    assert block["is_error"] is True
+    assert "outside this run's offboarding scope" in block["content"]

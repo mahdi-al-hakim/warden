@@ -23,6 +23,7 @@ from ..domain import (
     PolicyDecision,
     RiskTier,
     Session,
+    SessionStatus,
     StreamEvent,
     ToolResult,
 )
@@ -41,6 +42,8 @@ class HandledAction(BaseModel):
     decision: PolicyDecision | None = None
     result: ToolResult | None = None
     approver: str | None = None
+    # Why the action did not run, in words the agent is shown as its tool result.
+    reason: str | None = None
 
 
 class Broker:
@@ -101,12 +104,15 @@ class Broker:
     ) -> HandledAction:
         """Run one proposed action all the way through the control plane."""
         risk = self.registry.risk_for(tool, operation)
+        # Arguments come from a model or a file, so check their shape before anything reads them.
+        problem = self.registry.argument_problem(tool, operation, arguments)
         # Drop any agent-supplied tier unconditionally, then stamp the one the broker resolves. An
         # agent can never set its own account_tier, whether or not the target resolves to a user.
         resolved_args = {k: v for k, v in arguments.items() if k != "account_tier"}
-        tier = self.registry.resolve_account_tier(resolved_args)
-        if tier is not None:
-            resolved_args["account_tier"] = tier
+        if problem is None:
+            tier = self.registry.resolve_account_tier(resolved_args)
+            if tier is not None:
+                resolved_args["account_tier"] = tier
         action = ActionRequest(
             session_id=session.session_id,
             tool=tool,
@@ -128,6 +134,10 @@ class Broker:
 
         if not self.gateway.is_allowed(agent_id):
             return self._blocked(session, agent_id, action)
+        if problem is not None:
+            return self._denied_rule(
+                session, agent_id, action, "invalid-arguments", f"Invalid arguments: {problem}."
+            )
 
         decision = self.policy.evaluate(action)
         self._audit_decision(session, agent_id, action, decision)
@@ -146,11 +156,19 @@ class Broker:
         # agent cannot cut a bystander's access. This runs after policy, so the break-glass
         # over-reach is still denied as a privileged-account violation rather than a scope one.
         if self._out_of_subject_scope(session, action):
-            return self._denied_scope(session, agent_id, action)
+            return self._denied_rule(
+                session, agent_id, action, "scope-offboarding-subject",
+                f"{action.arguments.get('user_id')!r} is outside this run's offboarding scope "
+                f"(subject {session.subject!r}).",
+            )
 
         approver: str | None = None
         if decision.decision is Decision.REQUIRE_APPROVAL:
             approved, approver, timed_out = await self._await_approval(session, action, agent_id)
+            # A revoke ends the wait at once (see revoke), and whatever the human did, a revoked
+            # agent's action is recorded as stopped by the revoke, not as a denial or a timeout.
+            if not self.gateway.is_allowed(agent_id):
+                return self._blocked(session, agent_id, action)
             if not approved:
                 return self._denied(
                     session, agent_id, action, decision, approver=approver, timed_out=timed_out
@@ -220,6 +238,7 @@ class Broker:
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
         self._pending[action.action_id] = (future, action, agent_id)
+        session.status = SessionStatus.WAITING_APPROVAL
         self._event(
             EventType.APPROVAL_REQUESTED,
             session.session_id,
@@ -238,6 +257,8 @@ class Broker:
             return False, None, True
         finally:
             self._pending.pop(action.action_id, None)
+            if session.status is SessionStatus.WAITING_APPROVAL:
+                session.status = SessionStatus.RUNNING
 
     def resolve_approval(self, action_id: str, *, approved: bool, approver: str) -> bool:
         """Record a human's decision on a pending action. Idempotent; returns whether it applied."""
@@ -292,6 +313,11 @@ class Broker:
             agent_id=agent_id,
             actor=actor,
         )
+        # Release anything this agent has waiting on a human, so the run stops now rather than
+        # after the approval timeout.
+        for future, _action, pending_agent in list(self._pending.values()):
+            if pending_agent == agent_id and not future.done():
+                future.set_result((False, None))
 
     def _audit_decision(
         self, session: Session, agent_id: str, action: ActionRequest, decision: PolicyDecision
@@ -351,7 +377,8 @@ class Broker:
             reason=reason,
         )
         return HandledAction(
-            action_id=action.action_id, outcome=outcome, decision=decision, approver=approver
+            action_id=action.action_id, outcome=outcome, decision=decision, approver=approver,
+            reason=reason,
         )
 
     def _blocked(self, session: Session, agent_id: str, action: ActionRequest) -> HandledAction:
@@ -373,7 +400,10 @@ class Broker:
             outcome=ActionOutcome.BLOCKED_REVOKED.value,
             reason="the agent has been revoked",
         )
-        return HandledAction(action_id=action.action_id, outcome=ActionOutcome.BLOCKED_REVOKED)
+        return HandledAction(
+            action_id=action.action_id, outcome=ActionOutcome.BLOCKED_REVOKED,
+            reason="The agent has been revoked.",
+        )
 
     def _out_of_subject_scope(self, session: Session, action: ActionRequest) -> bool:
         """True when a write targets anyone other than the run's subject. Reads (LOW risk) are
@@ -384,15 +414,14 @@ class Broker:
         if not subject or action.risk_tier is RiskTier.LOW:
             return False
         target = action.arguments.get("user_id")
-        return bool(target) and target not in self.registry.identities_of(subject)
+        if target is None or target == "":
+            return False
+        return not isinstance(target, str) or target not in self.registry.identities_of(subject)
 
-    def _denied_scope(
-        self, session: Session, agent_id: str, action: ActionRequest
+    def _denied_rule(
+        self, session: Session, agent_id: str, action: ActionRequest, rule_id: str, reason: str
     ) -> HandledAction:
-        reason = (
-            f"{action.arguments.get('user_id')!r} is outside this run's offboarding scope "
-            f"(subject {session.subject!r})."
-        )
+        """A denial the broker makes itself, outside the policy ruleset (scope, malformed input)."""
         self.audit.append(
             session_id=session.session_id,
             kind=EventType.ACTION_BLOCKED,
@@ -402,7 +431,7 @@ class Broker:
                 "tool": action.tool,
                 "operation": action.operation,
                 "outcome": ActionOutcome.DENIED.value,
-                "rule_id": "scope-offboarding-subject",
+                "rule_id": rule_id,
                 "reason": reason,
             },
         )
@@ -413,4 +442,6 @@ class Broker:
             outcome=ActionOutcome.DENIED.value,
             reason=reason,
         )
-        return HandledAction(action_id=action.action_id, outcome=ActionOutcome.DENIED)
+        return HandledAction(
+            action_id=action.action_id, outcome=ActionOutcome.DENIED, reason=reason
+        )

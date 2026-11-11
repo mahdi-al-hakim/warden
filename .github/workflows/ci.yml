@@ -29,6 +29,28 @@ jobs:
         # Exits non-zero if any scenario or invariant fails, so the governance checks gate the build.
         run: python -m warden.eval
 
+      - name: Note-injection eval counter
+        # Checks the eval's counter on the authored runs; makes no API calls.
+        run: python scripts/note_injection_eval.py --controls-only
+
+  mutations:
+    name: Every control is caught when broken
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e ".[dev,live]"
+
+      - name: Mutation sweep
+        # Breaks each control in a scratch copy; fails if the eval and the unit tests both miss one.
+        run: python scripts/mutate_controls.py --check
+
   browser:
     name: Browser end-to-end tests
     runs-on: ubuntu-latest

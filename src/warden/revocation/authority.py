@@ -23,10 +23,15 @@ class RevocationAuthority:
         self._revoked: dict[str, RevocationRecord] = {}
         self._revoked_mono: dict[str, float] = {}
         self._receiver = None  # set by attach_receiver; avoids a hard import cycle
+        self._listeners: list[Callable[[str], None]] = []
 
     def attach_receiver(self, receiver) -> None:
         """Wire in a CAEP/SSF receiver so a revocation pushes a signal to cached validators."""
         self._receiver = receiver
+
+    def add_listener(self, listener: Callable[[str], None]) -> None:
+        """Call `listener(agent_id)` at the moment of each revocation."""
+        self._listeners.append(listener)
 
     def issue(self, agent_id: str, ttl_seconds: float = 3600.0) -> AgentCredential:
         """Mint a credential the agent presents on every call."""
@@ -42,6 +47,8 @@ class RevocationAuthority:
         self._revoked_mono[agent_id] = self._clock()
         if self._receiver is not None:
             self._receiver.on_revoked(agent_id)
+        for listener in self._listeners:
+            listener(agent_id)
         return record
 
     def is_revoked(self, agent_id: str) -> bool:

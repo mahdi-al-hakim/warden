@@ -444,7 +444,16 @@ kbd {
 .approval { border-color: rgba(242, 176, 60, 0.4); background: linear-gradient(180deg, var(--hold-bg), transparent 60%), var(--bg-elev); }
 .approval .panel-head h2 { color: var(--hold); }
 .approval-detail { font-size: 13px; margin-bottom: 13px; }
-.approval-detail .step-call { margin-top: 7px; }
+.approval-call {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--text);
+  word-break: break-word;
+}
+.approval-said { font-size: 12.5px; color: var(--text-dim); margin-top: 8px; line-height: 1.5; }
+.step-audit { font-size: 12.5px; color: var(--text-dim); }
+.step-audit a { color: var(--accent); }
+.step-audit[data-verified="no"] { border-color: rgba(240, 97, 109, 0.4); color: var(--block); }
 
 /* Resources --------------------------------------------------------------- */
 .resource-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }

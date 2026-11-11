@@ -139,3 +139,55 @@ async def test_unknown_run_is_404():
         with pytest.raises(httpx.HTTPStatusError):
             r = await client.post("/api/sessions/nope/approve", json={"action_id": "x"})
             r.raise_for_status()
+
+
+async def test_an_approval_without_a_decision_is_rejected():
+    # Leaving out "approved" must not count as approving the step.
+    async with _client(_app()) as client:
+        run_id = (await client.post("/api/sessions", json={})).json()["run_id"]
+        snap = await _poll(client, run_id, lambda s: s["pending_action_ids"])
+        resp = await client.post(f"/api/sessions/{run_id}/approve",
+                                 json={"action_id": snap["pending_action_ids"][0]})
+        assert resp.status_code == 422
+        assert (await client.get(f"/api/sessions/{run_id}")).json()["pending_action_ids"]
+
+
+async def test_the_number_of_runs_in_progress_is_capped():
+    async with _client(_app(approval_timeout_seconds=30.0)) as client:
+        codes = [(await client.post("/api/sessions", json={})).status_code for _ in range(5)]
+        assert codes == [200, 200, 200, 200, 429]
+
+
+async def test_a_finished_run_cannot_be_revoked_and_its_audit_is_readable():
+    async with _client(_app()) as client:
+        run_id = (await client.post("/api/sessions", json={})).json()["run_id"]
+        await _approve_when_pending(client, run_id)
+        await _poll(client, run_id, lambda s: s["done"])
+        assert (await client.post(f"/api/sessions/{run_id}/revoke", json={})).status_code == 409
+        audit = (await client.get(f"/api/sessions/{run_id}/audit")).json()
+        assert audit["verified"] is True
+        assert audit["entries"] == len(audit["events"]) > 0
+
+
+async def test_the_stream_resumes_after_the_last_event_id():
+    async with _client(_app()) as client:
+        run_id = (await client.post("/api/sessions", json={})).json()["run_id"]
+        await _approve_when_pending(client, run_id)
+        await _poll(client, run_id, lambda s: s["done"])
+        total = len((await client.get(f"/api/sessions/{run_id}")).json()["events"])
+
+        async def ids(headers):
+            async with client.stream("GET", f"/api/sessions/{run_id}/events",
+                                     headers=headers) as resp:
+                text = "".join([chunk async for chunk in resp.aiter_text()])
+            return [int(line[4:]) for line in text.splitlines() if line.startswith("id: ")]
+
+        assert await ids({}) == list(range(total))
+        assert await ids({"Last-Event-ID": "4"}) == list(range(5, total))
+
+
+def test_config_names_the_replay_source():
+    from fastapi.testclient import TestClient
+
+    cfg = TestClient(_app()).get("/api/config").json()
+    assert cfg["replay_source"] == "synthetic trajectory"

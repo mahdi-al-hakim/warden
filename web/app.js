@@ -12,7 +12,12 @@ const api = {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({}),
-    }).then((r) => r.json()),
+    }).then(async (r) => {
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.detail || `the server answered ${r.status}`);
+      return body;
+    }),
+  audit: (runId) => fetch(`/api/sessions/${runId}/audit`).then((r) => r.json()),
   approve: (runId, actionId, approved) =>
     fetch(`/api/sessions/${runId}/approve`, {
       method: "POST",
@@ -50,6 +55,7 @@ const dom = {
   benchNote: el("bench-note"),
   factSource: el("fact-source"),
   footModel: el("foot-model"),
+  disclaimer: el("disclaimer"),
 };
 
 const RESOURCES = [
@@ -211,6 +217,7 @@ const BLOCK_LABELS = {
 function onBlocked(d) {
   const step = upsertStep(d.action_id);
   step.el.dataset.decision = "blocked";
+  step.el.querySelectorAll(".tag-allow").forEach((t) => t.remove());
   addTag(step, "tag-blocked", BLOCK_LABELS[d.outcome] || "blocked");
   if (d.reason) {
     const reason = step.el.querySelector(".step-reason");
@@ -228,12 +235,13 @@ function showApproval(d) {
   // Build with textContent, never innerHTML: the summary and arguments are model-controlled in live
   // mode, so injecting them as HTML would let a steered agent script the operator's own console.
   dom.approvalDetail.textContent = "";
-  const summary = document.createElement("div");
-  summary.textContent = d.summary || "A high-risk step needs a human.";
   const call = document.createElement("div");
-  call.className = "step-call";
+  call.className = "approval-call";
   call.textContent = callLine(d.tool, d.operation, d.arguments);
-  dom.approvalDetail.append(summary, call);
+  const said = document.createElement("div");
+  said.className = "approval-said";
+  said.textContent = d.summary ? `The agent says: ${d.summary}` : "No explanation from the agent.";
+  dom.approvalDetail.append(call, said);
   dom.approvalCard.hidden = false;
   setStatus("waiting", "Waiting for approval");
 }
@@ -300,6 +308,7 @@ function onCompleted(d) {
     renderVerified(d.verified);
     reconcileResources(d.verified);
   }
+  if (state.runId) showAudit(state.runId);
   if (d.failed) finishRun("failed", "Failed");
   else if (d.revoked) finishRun("revoked", "Revoked");
   else if (d.verified && !d.verified.complete) finishRun("incomplete", "Incomplete");
@@ -349,6 +358,30 @@ function renderVerified(v) {
   dom.timeline.scrollTop = dom.timeline.scrollHeight;
 }
 
+async function showAudit(runId) {
+  let audit;
+  try {
+    audit = await api.audit(runId);
+  } catch {
+    return;
+  }
+  const li = document.createElement("li");
+  li.className = "step step-audit";
+  li.dataset.verified = audit.verified ? "yes" : "no";
+  const text = document.createElement("span");
+  text.textContent = audit.verified
+    ? `Audit log: ${audit.entries} entries, hash chain verified. `
+    : `Audit log: ${audit.entries} entries, hash chain FAILED at entry ${audit.first_bad_seq}. `;
+  const link = document.createElement("a");
+  link.href = `/api/sessions/${runId}/audit`;
+  link.target = "_blank";
+  link.rel = "noopener";
+  link.textContent = "View the log";
+  li.append(text, link);
+  dom.timeline.appendChild(li);
+  dom.timeline.scrollTop = dom.timeline.scrollHeight;
+}
+
 // The access panel ends on what the systems report, not on what the steps implied.
 function reconcileResources(v) {
   const byId = Object.fromEntries(v.checks.map((c) => [c.id, c]));
@@ -388,7 +421,14 @@ async function startRun() {
   dom.startBtn.disabled = true;
   dom.revokeBtn.disabled = false;
   setStatus("running", "Starting");
-  const res = await api.start();
+  let res;
+  try {
+    res = await api.start();
+  } catch (err) {
+    addSummary("Run not started", String(err.message || err));
+    finishRun("failed", "Not started");
+    return;
+  }
   state.runId = res.run_id;
   state.source = res.source;
   dom.factSource.textContent = res.source;
@@ -505,6 +545,14 @@ function startClock() {
 
 // Boot --------------------------------------------------------------------
 
+function disclaimerFor(backend) {
+  if (!backend || backend.backend !== "github") return "Synthetic data. No real accounts are touched.";
+  const writes = backend.writes_enabled
+    ? "writes are on, so removals are real"
+    : "writes are off, so removals are a dry run";
+  return `Directory and VPN are synthetic. Repository calls go to the GitHub org ${backend.org}; ${writes}.`;
+}
+
 function renderRepoBackend(backend) {
   if (!backend || backend.backend !== "github") return;
   // A real GitHub org is driving the repository tool, so say so and show the write state.
@@ -533,9 +581,10 @@ async function boot() {
     dom.modeChip.classList.add("live");
     dom.footModel.textContent = "Live model: " + config.model;
   } else {
-    dom.modeChip.textContent = "replay: synthetic trajectory";
+    dom.modeChip.textContent = "replay: " + (config.replay_source || "synthetic trajectory");
     dom.footModel.textContent = "Replay mode. Set a key and WARDEN_MODE=live to drive a real model.";
   }
+  dom.disclaimer.textContent = disclaimerFor(config.repo_backend);
   renderBars(bench);
 }
 

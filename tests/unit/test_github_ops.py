@@ -84,10 +84,13 @@ def test_remove_member_writes_exactly_one_delete_when_enabled():
     assert len(seen) == 1
 
 
-def test_remove_member_treats_404_as_already_gone():
-    tool, seen = _tool(lambda r: httpx.Response(404), allow_writes=True)
+def test_remove_member_reports_a_404_as_a_failure():
+    # A 404 can mean the login was never a collaborator or that the token cannot see the repo, so
+    # it must not read as a successful removal.
+    tool, _ = _tool(lambda request: httpx.Response(404), allow_writes=True)
     result = tool.run("remove_member", {"repo": "payments-api", "user_id": "contractor-test"})
-    assert result.ok is True
+    assert result.ok is False
+    assert "404" in result.error
 
 
 def test_from_env_is_none_without_a_token(monkeypatch):
@@ -127,3 +130,19 @@ async def test_the_subjects_test_login_is_linked_and_in_scope(monkeypatch):
     assert own.outcome is ActionOutcome.EXECUTED
     assert own.result.data["dry_run"] is True
     assert other.outcome is ActionOutcome.DENIED
+
+
+def test_list_members_reads_every_page():
+    def handler(request):
+        if "page=2" in str(request.url):
+            return httpx.Response(200, json=[{"login": "second-page-user"}])
+        return httpx.Response(
+            200, json=[{"login": "first-page-user"}],
+            headers={"Link": '<https://api.github.com/repos/warden-demo-org/payments-api/'
+                             'collaborators?per_page=100&page=2>; rel="next"'},
+        )
+
+    tool, seen = _tool(handler)
+    result = tool.run("list_members", {"repo": "payments-api"})
+    assert result.data["members"] == ["first-page-user", "second-page-user"]
+    assert len(seen) == 2

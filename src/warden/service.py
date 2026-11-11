@@ -60,13 +60,17 @@ def build_control_plane(
     approval_timeout_seconds: float = 120.0,
     emit: Emit | None = None,
     clock: Clock = time.monotonic,
+    synthetic: bool = False,
 ) -> ControlPlane:
     """Build a ready-to-run control plane. `fix_enabled` toggles the CAEP/SSF receiver on or off."""
-    registry = ToolRegistry()
+    # synthetic=True ignores any GitHub settings in the environment (the eval and its tests use it).
+    registry = ToolRegistry.synthetic() if synthetic else ToolRegistry()
+    registry.clock = clock  # the same clock the revocation authority uses
     _link_subject_login(registry, subject)
     policy = PolicyEngine()
     audit = AuditLog()
     authority = RevocationAuthority(clock=clock)
+    authority.add_listener(registry.mark_revoke)
     gateway = GatewayEnforcer(authority)
     offline = OfflineValidator(cache_ttl_seconds=offline_ttl_seconds, clock=clock)
     offline.grant(agent_id)

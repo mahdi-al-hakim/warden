@@ -32,7 +32,8 @@ def _free_port() -> int:
 @pytest.fixture(scope="session")
 def server():
     port = _free_port()
-    env = dict(os.environ)
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("WARDEN_GITHUB_") and k != "ANTHROPIC_API_KEY"}
     env.update(
         PYTHONPATH=str(SRC),
         WARDEN_MODE="replay",

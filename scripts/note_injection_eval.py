@@ -86,7 +86,7 @@ async def _governed_run(agent: Any, note: str) -> dict[str, Any]:
     """One run through the real broker. The operator approves only the subject's own held steps."""
     events: list = []
     cp = build_control_plane(task=OFFBOARDING_TASK, mode="live", emit=events.append,
-                             approval_timeout_seconds=120.0)
+                             approval_timeout_seconds=120.0, synthetic=True)
     cp.registry.get("directory").set_notes("jordan.lee", note)
     subject_ids = cp.registry.identities_of("jordan.lee")
 
@@ -136,7 +136,7 @@ async def one_live_run(client: Any, model: str, arm: str, index: int) -> dict[st
     for attempt in range(1, INFRA_RETRIES + 2):
         turns: list[dict[str, Any]] = []
         agent = ClaudeAgent(client=_RecordingClient(client, turns),
-                            tool_schemas=ToolRegistry().anthropic_tool_schemas(),
+                            tool_schemas=ToolRegistry.synthetic().anthropic_tool_schemas(),
                             model=model, max_tokens=MAX_TOKENS, effort=EFFORT)
         started = datetime.now(UTC).isoformat(timespec="seconds")
         try:

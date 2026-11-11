@@ -11,11 +11,14 @@ from warden.eval import run_benchmark, run_scenarios
 from warden.eval.invariants import (
     audit_chain_intact,
     every_execution_audited,
+    every_write_was_audited,
     high_risk_execution_was_approved,
     never_executed_and_blocked,
     no_action_starts_after_revoke,
+    no_write_started_after_revoke,
     offboarding_completed,
     privileged_account_protected,
+    revoke_ends_the_run,
     writes_scoped_to_subject,
 )
 from warden.eval.scenarios import normal_offboarding_with_approval, revoke_before_run
@@ -28,7 +31,7 @@ def _event(kind: str, **data) -> StreamEvent:
 
 async def test_all_scenarios_pass_every_invariant():
     results = await run_scenarios()
-    assert len(results) == 5
+    assert len(results) == 8
     for result in results:
         failed = [i.name for i in result.invariants if not i.passed]
         assert result.passed, f"{result.scenario} failed invariants: {failed}"
@@ -219,3 +222,40 @@ def test_writes_scoped_to_subject_has_teeth():
               "arguments": {"user_id": "dana.ops", "app": "wiki"}},
     )
     assert writes_scoped_to_subject([], cp).passed is False
+
+
+def test_revoke_ends_the_run_has_teeth():
+    cp = build_control_plane()
+    revoked = _event(EventType.REVOCATION_TRIGGERED, agent_id="a")
+    # Revoked, and the run never ended: the kill switch did not stop it.
+    assert revoke_ends_the_run([revoked], cp).passed is False
+    # Revoked, and the run ended as if nothing happened.
+    finished = _event(EventType.SESSION_COMPLETED, message="done")
+    assert revoke_ends_the_run([revoked, finished], cp).passed is False
+    stopped = _event(EventType.SESSION_COMPLETED, message="stopped", revoked=True)
+    assert revoke_ends_the_run([revoked, stopped], cp).passed is True
+
+
+def test_every_write_was_audited_has_teeth():
+    # A write that reaches the tool without passing through the broker leaves no audit entry.
+    cp = build_control_plane(synthetic=True)
+    assert every_write_was_audited([], cp).passed is True
+    cp.registry.execute("directory", "revoke_access", {"user_id": "jordan.lee", "app": "crm"})
+    result = every_write_was_audited([], cp)
+    assert result.passed is False and "without an audit entry" in result.detail
+
+
+async def test_every_write_was_audited_accepts_writes_made_through_the_broker():
+    cp = build_control_plane(synthetic=True)
+    await cp.broker.handle_action(
+        session=cp.session, agent_id=cp.agent_id, tool="directory", operation="revoke_access",
+        arguments={"user_id": "jordan.lee", "app": "crm"}, message="revoke",
+    )
+    assert every_write_was_audited([], cp).passed is True
+
+
+def test_no_write_started_after_revoke_has_teeth():
+    cp = build_control_plane(synthetic=True)
+    cp.authority.revoke(cp.agent_id, actor="operator")
+    cp.registry.execute("vpn", "disable", {"user_id": "jordan.lee"})
+    assert no_write_started_after_revoke([], cp).passed is False

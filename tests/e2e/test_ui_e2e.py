@@ -56,7 +56,7 @@ def test_reliability_checks_run(server, page):
         timeout=30000,
     )
     summary = page.inner_text("#eval-summary")
-    assert "5/5 scenarios passed" in summary
+    assert "8/8 scenarios passed" in summary
     assert page.console_errors == []
 
 
@@ -73,6 +73,8 @@ def test_a_finished_run_shows_the_agents_summary_and_the_systems_check(server, p
     check = page.locator('.step-verified[data-complete="yes"]')
     assert "4 of 4 steps done" in check.text_content()
     assert page.locator("#res-repo").inner_text().strip() == "Removed"
+    page.wait_for_selector('.step-audit[data-verified="yes"]', timeout=5000)
+    assert "hash chain verified" in page.locator(".step-audit").text_content()
     assert page.console_errors == []
 
 
@@ -84,5 +86,16 @@ def test_a_denied_disable_ends_incomplete_not_completed(server, page):
     page.wait_for_selector('#run-status[data-state="incomplete"]', timeout=20000)
 
     assert page.locator('.step-verified[data-complete="no"]').count() == 1
+    assert page.locator("#res-account").inner_text().strip() == "Active"
+    assert page.console_errors == []
+
+
+def test_revoking_while_an_approval_is_pending_stops_the_run(server, page):
+    page.goto(server, wait_until="networkidle")
+    page.click("#start-btn")
+    page.wait_for_selector("#approval-card:not([hidden])", timeout=20000)
+    page.click("#revoke-btn")
+    # Well under the approval timeout: the revoke ends the wait itself.
+    page.wait_for_selector('#run-status[data-state="revoked"]', timeout=5000)
     assert page.locator("#res-account").inner_text().strip() == "Active"
     assert page.console_errors == []

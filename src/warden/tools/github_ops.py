@@ -125,14 +125,22 @@ class GitHubTool(Tool):
     def _list_members(self, repo: str) -> ToolResult:
         if not self._in_scope(repo):
             return ToolResult(ok=False, error=f"repo {repo!r} is not in the configured scope")
-        try:
-            resp = self._client.get(f"/repos/{self._config.org}/{repo}/collaborators")
-        except httpx.HTTPError as exc:
-            return ToolResult(ok=False, error=f"github request failed: {exc}")
-        if resp.status_code != 200:
-            return ToolResult(ok=False, error=f"github returned {resp.status_code}")
-        members = sorted(item.get("login", "") for item in resp.json())
-        return ToolResult(ok=True, data={"repo": repo, "members": members})
+        url: str | None = f"/repos/{self._config.org}/{repo}/collaborators"
+        params: dict[str, int] | None = {"per_page": 100}
+        logins: list[str] = []
+        for _ in range(20):  # GitHub pages at 100; twenty pages is far past any demo repo
+            try:
+                resp = self._client.get(url, params=params)
+            except httpx.HTTPError as exc:
+                return ToolResult(ok=False, error=f"github request failed: {exc}")
+            if resp.status_code != 200:
+                return ToolResult(ok=False, error=f"github returned {resp.status_code}")
+            logins.extend(item.get("login", "") for item in resp.json())
+            url = resp.links.get("next", {}).get("url")
+            params = None  # the next link carries its own query string
+            if not url:
+                break
+        return ToolResult(ok=True, data={"repo": repo, "members": sorted(logins)})
 
     def _remove_member(self, repo: str, login: str) -> ToolResult:
         if not self._in_scope(repo):
@@ -158,12 +166,12 @@ class GitHubTool(Tool):
         if resp.status_code == 204:
             return ToolResult(ok=True, data={"repo": repo, "removed": login, "dry_run": False})
         if resp.status_code == 404:
-            # A 404 means the login is not a collaborator on this repo. That can be because it was
-            # already removed or never was, or because the token cannot see the repo. Report it as a
-            # non-removal rather than claiming a removal that may not have been needed or possible.
+            # GitHub documents 204, 403 and 422 for this call. A 404 can mean the login was never a
+            # collaborator, or that the token cannot see the repo, so it is reported as a failure;
+            # the end-of-run check then reads the collaborator list to show the real state.
             return ToolResult(
-                ok=True,
-                data={"repo": repo, "removed": None, "note": "login was not a collaborator",
-                      "dry_run": False},
+                ok=False,
+                error="github returned 404: the login is not a collaborator, or the token cannot "
+                      "see the repository",
             )
         return ToolResult(ok=False, error=f"github returned {resp.status_code}")

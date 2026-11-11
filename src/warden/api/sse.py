@@ -11,10 +11,15 @@ import json
 from ..domain import StreamEvent
 
 
-def sse_data(event: StreamEvent) -> str:
-    """One data frame. The event's type travels inside the JSON payload."""
+def sse_data(event: StreamEvent, event_id: int | None = None) -> str:
+    """One data frame. The event's type travels inside the JSON payload.
+
+    The id is the event's position in the run, so a browser that reconnects sends it back as
+    Last-Event-ID and the stream resumes after it instead of replaying the whole run.
+    """
     payload = json.dumps(event.model_dump(mode="json"), separators=(",", ":"))
-    return f"data: {payload}\n\n"
+    head = f"id: {event_id}\n" if event_id is not None else ""
+    return f"{head}data: {payload}\n\n"
 
 
 def sse_comment(text: str) -> str:

@@ -439,3 +439,106 @@ async def test_a_privileged_persons_login_is_judged_as_that_person():
     assert result.outcome is ActionOutcome.DENIED
     blocked = [e for e in cp.audit.events if e.kind == EventType.ACTION_BLOCKED]
     assert blocked[-1].data["rule_id"] == "deny-writes-to-privileged-accounts"
+
+
+async def test_a_revoke_while_nobody_answers_stops_the_run_at_once():
+    # The approval would wait a minute; the revoke must end the wait now, and the held step is
+    # recorded as stopped by the revoke, not as a denial or a timeout.
+    events, emit = _collector()
+    cp = build_control_plane(task=OFFBOARDING_TASK, emit=emit, approval_timeout_seconds=60.0)
+    run = asyncio.create_task(run_session(agent=ReplayAgent(), broker=cp.broker,
+                                          session=cp.session, task=OFFBOARDING_TASK, emit=emit))
+    await _wait_for_pending(cp.broker)
+    cp.broker.revoke(cp.session, cp.agent_id, actor="operator_dana")
+    session = await asyncio.wait_for(run, timeout=1.0)
+
+    assert session.status is SessionStatus.REVOKED
+    held = [e for e in events if e.type == EventType.ACTION_BLOCKED]
+    assert held[-1].data["outcome"] == "blocked_revoked"
+    jordan = cp.registry.execute("directory", "lookup_user", {"user_id": "jordan.lee"})
+    assert jordan.data["enabled"] is True
+
+
+async def test_malformed_arguments_are_denied_and_audited_instead_of_crashing():
+    # A list where a string belongs (from a model or a trajectory file) used to crash the run before
+    # anything was audited. It is now refused like any other broken call, and the run goes on.
+    cp = build_control_plane(task=OFFBOARDING_TASK)
+    bad = await cp.broker.handle_action(
+        session=cp.session, agent_id=cp.agent_id, tool="directory", operation="disable_account",
+        arguments={"user_id": ["jordan.lee"]}, message="bad",
+    )
+    missing = await cp.broker.handle_action(
+        session=cp.session, agent_id=cp.agent_id, tool="repo", operation="remove_member",
+        arguments={"repo": "payments-api"}, message="missing user_id",
+    )
+    assert bad.outcome is ActionOutcome.DENIED and "must be a string" in bad.reason
+    assert missing.outcome is ActionOutcome.DENIED and "missing required" in missing.reason
+    rules = [e.data["rule_id"] for e in cp.audit.events if e.kind == EventType.ACTION_BLOCKED]
+    assert rules == ["invalid-arguments", "invalid-arguments"]
+    assert cp.audit.verify().ok is True
+
+
+async def test_the_session_reads_waiting_while_a_step_is_held():
+    cp = build_control_plane(task=OFFBOARDING_TASK, approval_timeout_seconds=5.0)
+    run = asyncio.create_task(run_session(agent=ReplayAgent(), broker=cp.broker,
+                                          session=cp.session, task=OFFBOARDING_TASK))
+    action_id = await _wait_for_pending(cp.broker)
+    assert cp.session.status is SessionStatus.WAITING_APPROVAL
+    cp.broker.resolve_approval(action_id, approved=True, approver="operator_dana")
+    session = await run
+    assert session.status is SessionStatus.COMPLETED
+
+
+def test_a_synthetic_control_plane_ignores_github_settings(monkeypatch):
+    # The eval builds its control planes this way, so a token exported for a demo stays out of it.
+    monkeypatch.setenv("WARDEN_GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("WARDEN_GITHUB_ORG", "throwaway-org")
+    from warden.tools.access_ops import RepoTool
+
+    assert isinstance(build_control_plane(synthetic=True).registry.get("repo"), RepoTool)
+    assert not isinstance(build_control_plane().registry.get("repo"), RepoTool)
+
+
+class _AllowsOnce:
+    """A gateway that allows the first check and refuses every later one: a revoke landing after
+    the broker's opening check but before the action runs."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def is_allowed(self, agent_id):
+        self.calls += 1
+        return self.calls == 1
+
+
+async def test_the_final_check_before_running_stops_a_late_revoke():
+    cp = build_control_plane(task=OFFBOARDING_TASK)
+    cp.broker.gateway = _AllowsOnce()
+    result = await cp.broker.handle_action(
+        session=cp.session, agent_id=cp.agent_id, tool="vpn", operation="disable",
+        arguments={"user_id": "jordan.lee"}, message="turn off VPN",
+    )
+    assert result.outcome is ActionOutcome.BLOCKED_REVOKED
+    assert cp.registry.calls == []  # the tool never ran
+
+
+class _CountingAgent:
+    source = "test"
+
+    def __init__(self) -> None:
+        self.asked = 0
+
+    async def propose(self, task, history):
+        self.asked += 1
+        return AgentStep(kind="finish", message="done")
+
+
+async def test_a_revoked_agent_is_not_asked_for_another_step():
+    # In live mode every step is a paid model call, so a revoked agent is not consulted at all.
+    cp = build_control_plane(task=OFFBOARDING_TASK)
+    cp.broker.revoke(cp.session, cp.agent_id, actor="operator_dana")
+    agent = _CountingAgent()
+    session = await run_session(agent=agent, broker=cp.broker, session=cp.session,
+                                task=OFFBOARDING_TASK)
+    assert session.status is SessionStatus.REVOKED
+    assert agent.asked == 0

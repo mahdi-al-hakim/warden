@@ -8,22 +8,24 @@ stream is Server-Sent Events, one frame per thing that happened, so the page ref
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ..agent import OFFBOARDING_TASK
+from ..agent import OFFBOARDING_TASK, ReplayAgent
 from ..config import Settings
 from ..eval import build_report, run_benchmark
 from ..policy import PolicyEngine
-from .manager import SessionManager
+from .manager import SessionManager, TooManyRuns
 from .sse import sse_comment, sse_data
 
-WEB_DIR = Path(__file__).resolve().parents[3] / "web"
+# The UI lives next to the package in a checkout. WARDEN_WEB_DIR points elsewhere if needed.
+WEB_DIR = Path(os.getenv("WARDEN_WEB_DIR") or Path(__file__).resolve().parents[3] / "web")
 
 SSE_KEEPALIVE_SECONDS = 15.0
 
@@ -42,13 +44,24 @@ def _repo_backend() -> dict[str, Any]:
     return {"backend": "github", "org": config.org, "writes_enabled": config.allow_writes}
 
 
+def _replay_source(settings: Settings) -> str:
+    """What a replay run will show, so the page never calls a recorded run synthetic."""
+    if not settings.trajectory_path:
+        return "synthetic trajectory"
+    try:
+        return ReplayAgent.from_file(settings.trajectory_path).source
+    except (OSError, ValueError) as exc:
+        return f"unreadable trajectory file ({exc.__class__.__name__})"
+
+
 class StartRequest(BaseModel):
     mode: str | None = None
 
 
 class ApproveRequest(BaseModel):
     action_id: str
-    approved: bool = True
+    # No default: a request that does not say approve or deny must not count as either.
+    approved: bool
     approver: str = "operator"
 
 
@@ -63,7 +76,6 @@ def create_app(settings: Settings | None = None, *, web_dir: Path = WEB_DIR) -> 
     manager = SessionManager(settings)
     app.state.settings = settings
     app.state.manager = manager
-    app.state.eval_report = None
 
     @app.get("/healthz")
     def healthz() -> dict[str, Any]:
@@ -81,6 +93,7 @@ def create_app(settings: Settings | None = None, *, web_dir: Path = WEB_DIR) -> 
             "approval_timeout_seconds": settings.approval_timeout_seconds,
             "step_delay_seconds": settings.demo_step_delay_seconds,
             "repo_backend": _repo_backend(),
+            "replay_source": _replay_source(settings),
         }
 
     @app.get("/api/policy")
@@ -90,7 +103,12 @@ def create_app(settings: Settings | None = None, *, web_dir: Path = WEB_DIR) -> 
 
     @app.post("/api/sessions")
     async def start_session(body: StartRequest) -> dict[str, Any]:
-        handle = manager.start_run(mode=body.mode)
+        try:
+            handle = manager.start_run(mode=body.mode)
+        except TooManyRuns as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
+        except (OSError, ValueError) as exc:  # for example an unreadable trajectory file
+            raise HTTPException(status_code=500, detail=f"could not start the run: {exc}") from exc
         return {"run_id": handle.run_id, "source": handle.source}
 
     @app.get("/api/sessions/{run_id}")
@@ -107,19 +125,39 @@ def create_app(settings: Settings | None = None, *, web_dir: Path = WEB_DIR) -> 
             "events": [e.model_dump(mode="json") for e in handle.events],
         }
 
+    @app.get("/api/sessions/{run_id}/audit")
+    async def session_audit(run_id: str) -> dict[str, Any]:
+        """The run's hash-chained audit log and whether the chain verifies."""
+        handle = manager.get(run_id)
+        if handle is None or handle.cp is None:
+            raise HTTPException(status_code=404, detail="unknown run")
+        result = handle.cp.audit.verify()
+        return {
+            "run_id": handle.run_id,
+            "entries": len(handle.cp.audit.events),
+            "verified": result.ok,
+            "first_bad_seq": result.first_bad_seq,
+            "reason": result.reason,
+            "events": [e.model_dump(mode="json") for e in handle.cp.audit.events],
+        }
+
     @app.get("/api/sessions/{run_id}/events")
-    async def session_events(run_id: str) -> StreamingResponse:
+    async def session_events(run_id: str, request: Request) -> StreamingResponse:
         handle = manager.get(run_id)
         if handle is None:
             raise HTTPException(status_code=404, detail="unknown run")
+        try:
+            resume_after = int(request.headers.get("last-event-id", ""))
+        except ValueError:
+            resume_after = -1
 
         async def stream() -> Any:
             waiter = handle.add_waiter()
-            cursor = 0
+            cursor = max(resume_after + 1, 0)
             try:
                 while True:
                     while cursor < len(handle.events):
-                        yield sse_data(handle.events[cursor])
+                        yield sse_data(handle.events[cursor], cursor)
                         cursor += 1
                     if handle.done.is_set():
                         break
@@ -151,6 +189,8 @@ def create_app(settings: Settings | None = None, *, web_dir: Path = WEB_DIR) -> 
         handle = manager.get(run_id)
         if handle is None or handle.cp is None:
             raise HTTPException(status_code=404, detail="unknown run")
+        if handle.done.is_set():
+            raise HTTPException(status_code=409, detail="the run has already ended")
         handle.cp.broker.revoke(handle.cp.session, handle.cp.agent_id, actor=body.actor)
         return {"revoked": True}
 
@@ -159,10 +199,9 @@ def create_app(settings: Settings | None = None, *, web_dir: Path = WEB_DIR) -> 
         return run_benchmark().model_dump(mode="json")
 
     @app.get("/api/eval")
-    async def evaluation(refresh: bool = False) -> dict[str, Any]:
-        if app.state.eval_report is None or refresh:
-            app.state.eval_report = await build_report()
-        return app.state.eval_report.model_dump(mode="json")
+    async def evaluation() -> dict[str, Any]:
+        # Re-run every time: the checks take a fraction of a second, so "Run checks" runs them.
+        return (await build_report()).model_dump(mode="json")
 
     if web_dir.is_dir():
         app.mount("/static", StaticFiles(directory=str(web_dir)), name="static")

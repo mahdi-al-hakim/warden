@@ -56,6 +56,12 @@ async def run_session(
     )
     history: list[dict] = []
     for _ in range(max_steps):
+        # Stop before asking for another step once the agent is revoked. The broker would block the
+        # step anyway; this just avoids a wasted (and in live mode, paid) model turn.
+        if not broker.gateway.is_allowed(session.agent_id):
+            session.status = SessionStatus.REVOKED
+            await finish("Run stopped: the agent was revoked.", revoked=True)
+            return session
         try:
             step = await agent.propose(task, history)
         except AgentError as exc:
@@ -90,6 +96,7 @@ async def run_session(
                 "outcome": handled.outcome.value,
                 "result": handled.result.data if handled.result else None,
                 "error": handled.result.error if handled.result else None,
+                "reason": handled.reason,
             }
         )
         if handled.outcome is ActionOutcome.BLOCKED_REVOKED:

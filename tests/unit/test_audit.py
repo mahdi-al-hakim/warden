@@ -130,3 +130,14 @@ def test_redacts_aws_and_github_tokens_under_harmless_keys():
 
 def test_empty_log_verifies():
     assert AuditLog().verify().ok is True
+
+
+def test_token_counts_are_kept_and_nested_secrets_are_masked():
+    out = redact({
+        "usage": {"input_tokens": 1041, "output_tokens": 79, "cache_read_input_tokens": 0},
+        "batches": [["sk-ant-abc123DEF456ghi789", "ok"], ("ghp_abcdefghijk",)],
+    })
+    assert out["usage"] == {"input_tokens": 1041, "output_tokens": 79,
+                            "cache_read_input_tokens": 0}
+    assert out["batches"][0][0] == "[redacted]" and out["batches"][0][1] == "ok"
+    assert out["batches"][1][0] == "[redacted]"

@@ -50,14 +50,23 @@ class RunHandle:
             waiter.set()
 
 
-class SessionManager:
-    """Creates and tracks runs. One per browser session in the demo; many could run at once."""
+class TooManyRuns(RuntimeError):
+    """More runs are in progress than the server allows at once."""
 
-    def __init__(self, settings: Settings, *, max_runs: int = 64) -> None:
+
+class SessionManager:
+    """Creates and tracks runs. One per browser session in the demo; a few can run at once."""
+
+    def __init__(self, settings: Settings, *, max_runs: int = 64, max_active: int = 4) -> None:
         self._settings = settings
         self._runs: dict[str, RunHandle] = {}
         self._client = None  # a shared AsyncAnthropic, created the first time live mode is used
         self._max_runs = max_runs
+        # In live mode every run calls a paid model, so the number running at once is capped.
+        self._max_active = max_active
+
+    def active_runs(self) -> int:
+        return sum(1 for h in self._runs.values() if not h.done.is_set())
 
     def get(self, run_id: str) -> RunHandle | None:
         return self._runs.get(run_id)
@@ -99,6 +108,8 @@ class SessionManager:
 
     def start_run(self, *, mode: str | None = None) -> RunHandle:
         """Build a control plane, launch the governed run as a task, and return its handle."""
+        if self.active_runs() >= self._max_active:
+            raise TooManyRuns(f"{self._max_active} runs are already in progress")
         requested = (mode or self._settings.mode).strip().lower()
         live = requested == "live" and self._settings.live_ready
         run_id = uuid4().hex[:12]

@@ -27,7 +27,9 @@ SYSTEM_PROMPT = (
 # Stop reasons that mean the model finished its turn normally. Anything else is a broken turn.
 _NORMAL_STOPS = {None, "tool_use", "end_turn", "stop_sequence"}
 
-_DENIED = "Policy denied this action. Do not retry it; continue with the rest of the task."
+_DENIED = (
+    "This action was denied and did not run. Do not retry it; continue with the rest of the task."
+)
 _TIMED_OUT = "No operator approved this in time, so it did not run. Continue with the other steps."
 _REVOKED = "Access has been revoked. Stop and do nothing further."
 
@@ -73,6 +75,7 @@ class ClaudeAgent:
                             "type": "tool_result",
                             "tool_use_id": self._pending_tool_use_id,
                             "content": _result_text(history[-1]),
+                            "is_error": history[-1].get("outcome") != "executed",
                         }
                     ],
                 }
@@ -136,7 +139,8 @@ def _result_text(entry: dict[str, Any]) -> str:
     if outcome == "failed":
         return f"The tool failed: {entry.get('error') or 'unknown error'}"
     if outcome == "denied":
-        return _DENIED
+        reason = entry.get("reason")
+        return f"{_DENIED} Reason: {reason}" if reason else _DENIED
     if outcome == "timed_out":
         return _TIMED_OUT
     if outcome == "blocked_revoked":

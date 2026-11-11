@@ -27,7 +27,15 @@ SECRET_FRAGMENTS = (
     "bearer",
 )
 # Keys that contain a fragment above but are safe, so they are not redacted.
-SECRET_ALLOWLIST = {"token_count", "tokens", "max_tokens"}
+SECRET_ALLOWLIST = {
+    "token_count",
+    "tokens",
+    "max_tokens",
+    "input_tokens",
+    "output_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+}
 
 _EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 _LONG_DIGITS = re.compile(r"\b\d{7,}\b")
@@ -71,16 +79,16 @@ def redact(data: dict[str, Any]) -> dict[str, Any]:
     """Return a copy of `data` with secrets removed and personal detail partially masked."""
     out: dict[str, Any] = {}
     for key, value in data.items():
-        if _is_secret_key(key):
+        if isinstance(key, str) and _is_secret_key(key):
             out[key] = "[redacted]"
-        elif isinstance(value, dict):
-            out[key] = redact(value)
-        elif isinstance(value, list):
-            out[key] = [redact(v) if isinstance(v, dict) else _mask_item(v) for v in value]
         else:
-            out[key] = _mask_item(value)
+            out[key] = _redact_value(value)
     return out
 
 
-def _mask_item(value: Any) -> Any:
+def _redact_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return redact(value)
+    if isinstance(value, (list, tuple)):
+        return [_redact_value(v) for v in value]
     return _mask_text(value) if isinstance(value, str) else value
