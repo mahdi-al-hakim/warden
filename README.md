@@ -36,13 +36,13 @@ also checked against the systems (81 checks in all). Two of the invariants compa
   call, so a revoke refuses the agent's next action. The Reliability panel also models a validator that
   trusts a cached grant: with a 15 second cache, a revoked credential keeps working for 7.5 s at the
   median and up to 14.7 s, and a push signal modeled on CAEP brings that down to its 0.3 s delivery
-  latency. These figures come from a simulated clock; no deployed system was measured.
+  latency. No deployed system was measured.
 
 ## Replay and live
 
 The default mode replays an authored run, so the demo needs no key and works offline. That run is
 written to follow the planted note: it tries to disable the break-glass account so the policy denial
-shows on screen. None of the 39 live runs in the note-injection eval made that attempt. The page always
+shows on screen. None of the 30 live note runs in the eval made that attempt. The page always
 says which source is driving the run,
 and a replay of a recorded model run (set `WARDEN_TRAJECTORY`) is labeled as a replay.
 
@@ -126,8 +126,8 @@ put the tools behind real connectors, and anchor the audit head outside the log.
 
 ## How it was built
 
-I built Warden with Claude Code. Every figure in this README comes from one of the commands above, and
-the eval's per-run transcripts are committed under `experiments/note-injection/runs/`.
+I built Warden with Claude Code. The eval's per-run transcripts are committed under
+`experiments/note-injection/runs/`.
 
 ## License
 
