@@ -30,11 +30,22 @@ class Mutation:
     path: str
     old: str
     new: str
+    # Replace every occurrence instead of the first. The broker checks revocation in more than one
+    # place on purpose, so removing a single check is masked by the others; this is how a sweep
+    # removes them all at once.
+    every: bool = False
 
 
 MUTATIONS = [
     Mutation(
-        "Revocation is checked before an action runs",
+        "The broker refuses every action from a revoked agent",
+        "src/warden/gateway/broker.py",
+        "self.gateway.is_allowed(agent_id)",
+        "True",
+        every=True,
+    ),
+    Mutation(
+        "Revocation is re-checked at the commit point",
         "src/warden/gateway/broker.py",
         """            if not self.gateway.is_allowed(agent_id):
                 return self._blocked(session, agent_id, action)
@@ -185,7 +196,7 @@ def check_one(m: Mutation) -> dict:
         text = target.read_text(encoding="utf-8")
         if m.old not in text:
             raise SystemExit(f"mutation target not found, update the sweep: {m.control}")
-        target.write_text(text.replace(m.old, m.new, 1), encoding="utf-8")
+        target.write_text(text.replace(m.old, m.new, -1 if m.every else 1), encoding="utf-8")
 
         ev = _run([sys.executable, "-m", "warden.eval", "--json"], copy)
         failed_invariants: list[str] = []

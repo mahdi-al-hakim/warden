@@ -66,7 +66,7 @@ def test_reliability_checks_run(server, page):
         timeout=30000,
     )
     summary = page.inner_text("#eval-summary")
-    assert "8/8 scenarios passed" in summary
+    assert "10/10 scenarios passed" in summary
     assert page.console_errors == []
 
 

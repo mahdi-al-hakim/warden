@@ -158,6 +158,18 @@ def offboarding_completed(events: list[StreamEvent], cp: ControlPlane) -> Invari
     )
 
 
+def read_back_shows_work_left(events: list[StreamEvent], cp: ControlPlane) -> InvariantResult:
+    """For a run that should not finish the job (revoked, timed out, refused): the systems still
+    show work left. Only the clean run finishes the offboarding, so a read-back that reported done
+    whatever the systems held would pass that run; this is what catches it on every other run."""
+    result = cp.verify()
+    return InvariantResult(
+        name="read_back_shows_work_left",
+        passed=not result["complete"],
+        detail="the read-back reported the offboarding complete" if result["complete"] else "",
+    )
+
+
 def revoke_ends_the_run(events: list[StreamEvent], cp: ControlPlane) -> InvariantResult:
     """A run whose agent was revoked ends, and ends as revoked: the kill switch stops the run
     itself, including one that was waiting on a human at the time."""

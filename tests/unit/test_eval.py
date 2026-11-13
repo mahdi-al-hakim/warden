@@ -31,7 +31,7 @@ def _event(kind: str, **data) -> StreamEvent:
 
 async def test_all_scenarios_pass_every_invariant():
     results = await run_scenarios()
-    assert len(results) == 8
+    assert len(results) == 10
     for result in results:
         failed = [i.name for i in result.invariants if not i.passed]
         assert result.passed, f"{result.scenario} failed invariants: {failed}"
@@ -42,6 +42,8 @@ async def test_expected_final_states():
     assert results["normal_offboarding_with_approval"].final_status == "completed"
     assert results["revoke_before_run"].final_status == "revoked"
     assert results["revoke_during_approval"].final_status == "revoked"
+    assert results["revoked_agent_keeps_proposing"].final_status == "revoked"
+    assert results["revoke_lands_while_a_write_waits_its_turn"].final_status == "revoked"
     assert results["approval_times_out"].final_status == "completed"
     assert results["tool_failure_is_handled"].final_status == "completed"
 
@@ -259,3 +261,42 @@ def test_no_write_started_after_revoke_has_teeth():
     cp.authority.revoke(cp.agent_id, actor="operator")
     cp.registry.execute("vpn", "disable", {"user_id": "jordan.lee"})
     assert no_write_started_after_revoke([], cp).passed is False
+
+
+async def test_a_revoked_agent_that_keeps_acting_is_refused_at_the_broker():
+    """Every action a revoked agent sends straight to the broker is blocked as revoked, and none
+    executes. The runner never asks it for a step, so only the broker's check can do this."""
+    results = {r.scenario: r for r in await run_scenarios()}
+    counts = results["revoked_agent_keeps_proposing"].outcome_counts
+    assert counts.get("blocked_revoked") == 3
+    assert not counts.get("executed")
+
+
+async def test_the_commit_point_check_stops_a_write_queued_before_the_revoke():
+    """The write passed the first revocation check before the revoke; only the re-check under the
+    session lock can stop it, and the read that held the lock still completes."""
+    results = {r.scenario: r for r in await run_scenarios()}
+    counts = results["revoke_lands_while_a_write_waits_its_turn"].outcome_counts
+    assert counts == {"executed": 1, "blocked_revoked": 1}
+
+
+async def test_a_scenario_whose_outcomes_differ_from_its_declaration_fails():
+    from warden.eval.harness import evaluate_run
+    from warden.eval.scenarios import revoked_agent_keeps_proposing
+
+    run = await revoked_agent_keeps_proposing()
+    run.expected_outcomes = {"blocked_revoked": 2}
+    result = evaluate_run(run)
+    assert not result.passed
+    assert [i.name for i in result.invariants if not i.passed] == ["expected_outcomes"]
+
+
+async def test_a_read_back_that_always_says_done_fails_the_unfinished_runs():
+    from warden.eval.harness import evaluate_run
+    from warden.eval.scenarios import revoke_before_run
+
+    run = await revoke_before_run()
+    real = run.cp.verify
+    run.cp.verify = lambda: {**real(), "complete": True}
+    result = evaluate_run(run)
+    assert "read_back_shows_work_left" in [i.name for i in result.invariants if not i.passed]

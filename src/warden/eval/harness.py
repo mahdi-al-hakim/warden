@@ -6,8 +6,12 @@ import asyncio
 
 from ..domain import EventType, utcnow
 from .benchmark import run_benchmark
-from .invariants import check_all, offboarding_completed
-from .report import EvalReport, ScenarioResult
+from .invariants import (
+    check_all,
+    offboarding_completed,
+    read_back_shows_work_left,
+)
+from .report import EvalReport, InvariantResult, ScenarioResult
 from .scenarios import ALL_SCENARIOS, ScenarioRun
 
 
@@ -28,9 +32,20 @@ def _outcome_counts(run: ScenarioRun) -> dict[str, int]:
 def evaluate_run(run: ScenarioRun) -> ScenarioResult:
     """Check every invariant against one finished scenario run."""
     invariants = check_all(run.events, run.cp)
+    # Every run is read back from the systems. A run meant to finish the job must show it done; any
+    # other run must still show work left, so a read-back that always said "done" would fail here.
     if run.expects_completion:
-        # A run meant to finish the job must prove it did, not only that nothing unsafe ran.
         invariants.append(offboarding_completed(run.events, run.cp))
+    else:
+        invariants.append(read_back_shows_work_left(run.events, run.cp))
+    counts = _outcome_counts(run)
+    if run.expected_outcomes is not None:
+        invariants.append(InvariantResult(
+            name="expected_outcomes",
+            passed=counts == run.expected_outcomes,
+            detail="" if counts == run.expected_outcomes
+            else f"expected {run.expected_outcomes}, got {counts}",
+        ))
     executed = sum(1 for e in run.events if e.type == EventType.ACTION_EXECUTED)
     return ScenarioResult(
         scenario=run.name,
@@ -38,7 +53,7 @@ def evaluate_run(run: ScenarioRun) -> ScenarioResult:
         passed=all(i.passed for i in invariants),
         final_status=run.session.status.value,
         steps_executed=executed,
-        outcome_counts=_outcome_counts(run),
+        outcome_counts=counts,
         invariants=invariants,
     )
 

@@ -23,12 +23,13 @@ offline as a labeled replay, or live through the Claude API; live mode has been 
   break-glass account with the operator. The design was committed before the first run. Ten runs per
   model still allows a true rate of up to about one in four, and this is one wording of one request.
   [Design](experiments/note-injection/DESIGN.md), [results](experiments/note-injection/RESULTS.md).
-- **The kill switch and the other controls.** Eight scenarios, including a revoke that lands while a
-  step waits for approval, are each checked against ten invariants after the run, and the clean run is
-also checked against the systems (81 checks in all). Two of the invariants compare
-  the broker's records with a call log the tool registry keeps itself, so a broker that skipped its own
-  bookkeeping would fail them. A mutation sweep breaks 16 controls one at a time, and the eval or the
-  unit tests catch all 16. CI runs both on every push. [Reliability](docs/reliability.md).
+- **The kill switch and the other controls.** Ten scenarios, including a revoke that lands while a step
+  waits for approval, one that lands while a write waits its turn, and a revoked agent that keeps
+  sending actions, are each checked against ten invariants, read back from the systems, and held to
+  the exact action outcomes they declare (120 checks in all). Two of the invariants compare the
+  broker's records with a call log the tool registry keeps itself, so a broker that skipped its own
+  bookkeeping would fail them. A mutation sweep breaks 17 controls one at a time: the eval catches 10
+  and the unit tests catch all 17. CI runs both on every push. [Reliability](docs/reliability.md).
 - **What the agent says next to what happened.** Every run ends with the agent's summary beside a check
   that reads the directory, the VPN and each repository back. The UI marks a run completed only when
   that check passes.
