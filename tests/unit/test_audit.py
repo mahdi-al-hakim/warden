@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+import importlib
+import random
+import time
+
 from warden.audit import AuditLog, redact
+
+# The package re-exports the function under the module's name, so reach the module explicitly.
+redaction = importlib.import_module("warden.audit.redact")
 
 
 def _log_with_three() -> AuditLog:
@@ -141,3 +148,79 @@ def test_token_counts_are_kept_and_nested_secrets_are_masked():
                             "cache_read_input_tokens": 0}
     assert out["batches"][0][0] == "[redacted]" and out["batches"][0][1] == "ok"
     assert out["batches"][1][0] == "[redacted]"
+
+
+# Redaction runs on the server's event loop, so its cost is a liveness property of the kill switch.
+# A long string with no spaces used to take about seven seconds in the email pattern alone, because
+# re.sub retried a match from every position in the run. These pin the speed, the size limit, and
+# that the faster code masks exactly what the plain regex substitution would.
+
+_ADVERSARIAL = {
+    "letters": "a" * 100_000,
+    "digits": "1" * 100_000,
+    "dotted": "a." * 50_000,
+    "after an at": "x@" + "a." * 50_000,
+    "before an at": "a" * 100_000 + "@",
+    "jwt starts": "eyJ-" * 25_000,
+}
+
+
+def test_redaction_is_linear_on_adversarial_input():
+    for name, text in _ADVERSARIAL.items():
+        started = time.perf_counter()
+        redaction._mask_text(text)
+        elapsed = time.perf_counter() - started
+        # Linear code takes milliseconds on 100 KB; the quadratic version took seconds per pass.
+        assert elapsed < 1.0, f"{name}: {elapsed:.2f}s on 100 KB"
+
+
+def test_a_value_over_the_limit_is_replaced_by_its_size():
+    huge = "a" * (redaction.MAX_AUDIT_TEXT + 1)
+    started = time.perf_counter()
+    out = redact({"note": huge, "nested": [huge]})
+    assert time.perf_counter() - started < 0.5
+    assert out["note"] == f"[{len(huge)} characters not kept]"
+    assert out["nested"] == [f"[{len(huge)} characters not kept]"]
+    at_limit = "a" * redaction.MAX_AUDIT_TEXT
+    assert redact({"note": at_limit})["note"] == at_limit
+
+
+def test_the_scanner_character_sets_match_the_regex_classes():
+    """The linear scanners copy two character classes out of the patterns; a later edit to one
+    without the other would make them disagree, so compare them over every ASCII character."""
+    import re
+
+    def first_class(pattern: str) -> str:
+        start = pattern.index("[")
+        return pattern[start : pattern.index("]", start) + 1]
+
+    local = re.compile(first_class(redaction._EMAIL.pattern))
+    segment = re.compile(first_class(redaction._JWT_VALUE.pattern.split("eyJ", 1)[1]))
+    for code in range(128):
+        char = chr(code)
+        assert (char in redaction._LOCAL_CHARS) == bool(local.fullmatch(char)), repr(char)
+        assert (char in redaction._SEGMENT_CHARS) == bool(segment.fullmatch(char)), repr(char)
+
+
+def test_fast_masking_matches_a_plain_regex_substitution():
+    def plain_emails(text: str) -> str:
+        return redaction._EMAIL.sub(lambda m: redaction._mask_email(m.group(0)), text)
+
+    def plain_jwts(text: str) -> str:
+        return redaction._JWT_VALUE.sub("[redacted]", text)
+
+    atoms = ["a", "Z", "9", ".", "-", "_", "@", "%", "+", " ", "eyJ", "abcdefgh", "x.com", "\n"]
+    rng = random.Random(20261113)
+    samples = [
+        "a@x.com-b@y.com",
+        "a@b-c@d.com",
+        "foo.bar@x.com, baz@y.org",
+        "x-eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl",
+    ] + ["".join(rng.choice(atoms) for _ in range(rng.randint(1, 60))) for _ in range(20_000)]
+    for text in samples:
+        assert redaction._mask_emails(text) == plain_emails(text), repr(text)
+        assert redaction._mask_jwts(text) == plain_jwts(text), repr(text)
+
+
+def test_adjacent_addresses_are_both_masked():
+    assert redact({"note": "a@x.com-b@y.com"})["note"] == "a***@x.com-***@y.com"

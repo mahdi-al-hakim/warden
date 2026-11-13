@@ -542,3 +542,30 @@ async def test_a_revoked_agent_is_not_asked_for_another_step():
                                 task=OFFBOARDING_TASK)
     assert session.status is SessionStatus.REVOKED
     assert agent.asked == 0
+
+
+async def test_a_huge_argument_does_not_stall_the_event_loop():
+    """The kill switch shares the event loop with the broker. A 100 KB argument once held that loop
+    for seconds while the audit log redacted it, so a revoke could not even be received. A ticker
+    measures the longest stretch the loop was unavailable while the broker handles such a call."""
+    cp = build_control_plane(task=OFFBOARDING_TASK, approval_timeout_seconds=5.0)
+    loop = asyncio.get_running_loop()
+    gaps: list[float] = []
+    done = asyncio.Event()
+
+    async def ticker() -> None:
+        last = loop.time()
+        while not done.is_set():
+            await asyncio.sleep(0.005)
+            gaps.append(loop.time() - last)
+            last = loop.time()
+
+    task = asyncio.create_task(ticker())
+    await asyncio.sleep(0.02)
+    await cp.broker.handle_action(
+        session=cp.session, agent_id=cp.agent_id, tool="repo", operation="list_members",
+        arguments={"repo": "a" * 100_000}, message="listing",
+    )
+    done.set()
+    await task
+    assert max(gaps) < 1.0, f"the event loop was held for {max(gaps):.2f}s"
