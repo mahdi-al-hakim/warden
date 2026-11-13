@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from ..audit import redact
 from ..domain import EventType, RiskTier, StreamEvent
 from ..service import ControlPlane
 from .report import InvariantResult
@@ -194,7 +195,8 @@ def every_write_was_audited(events: list[StreamEvent], cp: ControlPlane) -> Inva
 
     The left side comes from the tool registry's own call log, not from the broker, so this catches
     a broker that runs a tool and skips its records, which a check comparing the broker's stream
-    with the broker's audit cannot see.
+    with the broker's audit cannot see. The audit stores arguments redacted and the call log stores
+    them as sent, so the call log's side is redacted the same way before they are compared.
     """
     audited = [
         (e.data.get("tool"), e.data.get("operation"), _without_tier(e.data.get("arguments")))
@@ -204,7 +206,7 @@ def every_write_was_audited(events: list[StreamEvent], cp: ControlPlane) -> Inva
     for call in cp.registry.calls:
         if call["operation"] not in _WRITE_OPS:
             continue
-        key = (call["tool"], call["operation"], _without_tier(call["arguments"]))
+        key = (call["tool"], call["operation"], _without_tier(redact(call["arguments"])))
         if key in audited:
             audited.remove(key)
             continue

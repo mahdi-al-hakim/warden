@@ -300,3 +300,18 @@ async def test_a_read_back_that_always_says_done_fails_the_unfinished_runs():
     run.cp.verify = lambda: {**real(), "complete": True}
     result = evaluate_run(run)
     assert "read_back_shows_work_left" in [i.name for i in result.invariants if not i.passed]
+
+
+async def test_a_write_whose_arguments_redaction_changes_still_counts_as_audited():
+    """The audit stores an email masked; the registry's call log keeps it as sent. Comparing them
+    unmasked reported an audited write as missing from the audit."""
+    from warden.agent import OFFBOARDING_TASK
+    from warden.eval.invariants import every_write_was_audited
+
+    cp = build_control_plane(task=OFFBOARDING_TASK, approval_timeout_seconds=5.0)
+    await cp.broker.handle_action(
+        session=cp.session, agent_id=cp.agent_id, tool="directory", operation="revoke_access",
+        arguments={"user_id": "jordan.lee", "app": "owner@acme.example"}, message="revoke",
+    )
+    assert any(c["operation"] == "revoke_access" for c in cp.registry.calls)
+    assert every_write_was_audited([], cp).passed
