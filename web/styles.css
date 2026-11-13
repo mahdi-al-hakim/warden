@@ -235,6 +235,15 @@ kbd {
 
 /* Activity ---------------------------------------------------------------- */
 .activity { min-height: 560px; display: flex; flex-direction: column; }
+/* Side by side, the feed fits the window and scrolls inside its panel, so it follows the newest step
+   (app.js scrolls it) and the operator console, Revoke included, stays in view. Without a height
+   limit the feed grew the page instead, and a run's denial and final check landed below the fold.
+   The 560px minimum gives way on a short window, since a minimum wins over a maximum and kept the
+   panel taller than the window below 656px. */
+@media (min-width: 941px) {
+  .activity { min-height: min(560px, calc(100vh - 96px)); max-height: calc(100vh - 96px); }
+  .stream { min-height: 0; }
+}
 .task-bar {
   display: flex;
   align-items: baseline;
@@ -356,6 +365,9 @@ kbd {
   margin-bottom: 7px;
 }
 .summary-text { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--text); white-space: pre-line; }
+/* app.js scrolls the read-back into view while its entry animation can still have it up to 5px low.
+   The margin keeps it clear of the window edge once it settles. */
+.step-verified { scroll-margin: 12px 0; }
 .step-verified[data-complete="yes"] { border-color: rgba(70, 208, 127, 0.3); }
 .step-verified[data-complete="yes"]::before { border-color: var(--allow); }
 .step-verified[data-complete="no"] { border-color: rgba(240, 97, 109, 0.3); }

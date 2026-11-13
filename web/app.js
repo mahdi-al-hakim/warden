@@ -156,8 +156,13 @@ function upsertStep(actionId) {
   dom.timeline.appendChild(li);
   step = { el: li, args: {}, tool: "", operation: "" };
   state.steps.set(actionId, step);
-  dom.timeline.scrollTop = dom.timeline.scrollHeight;
   return step;
+}
+
+// Scroll the feed to its newest line. Call it once the line's content is in place: scrolling when the
+// empty line was added, and filling it in after, left the newest step cut off at the bottom.
+function followFeed() {
+  dom.timeline.scrollTop = dom.timeline.scrollHeight;
 }
 
 function addTag(step, cls, text) {
@@ -244,6 +249,9 @@ function showApproval(d) {
   dom.approvalDetail.append(call, said);
   dom.approvalCard.hidden = false;
   setStatus("waiting", "Waiting for approval");
+  // In one column the card sits below the feed, off screen. "nearest" moves the page only when the
+  // card is not already fully in view, so side by side, with the page at the top, it does nothing.
+  dom.approvalCard.scrollIntoView({ block: "nearest" });
 }
 
 function clearApprovalIf(actionId) {
@@ -297,6 +305,8 @@ function handleEvent(event) {
       break;
     default: break;
   }
+  // Last, so the feed scrolls to the step as the handler filled it in.
+  followFeed();
 }
 
 // End of run --------------------------------------------------------------
@@ -308,7 +318,9 @@ function onCompleted(d) {
     renderVerified(d.verified);
     reconcileResources(d.verified);
   }
-  if (state.runId) showAudit(state.runId);
+  // The read-back is shown after the audit line, since following the feed to that line can push the
+  // read-back up and out of a short feed.
+  if (state.runId) showAudit(state.runId).finally(showReadBack);
   if (d.failed) finishRun("failed", "Failed");
   else if (d.revoked) finishRun("revoked", "Revoked");
   else if (!d.verified) finishRun("incomplete", "Not verified");
@@ -328,7 +340,7 @@ function addSummary(title, text) {
   body.textContent = String(text).replace(/\*\*(.+?)\*\*/g, "$1");
   li.append(head, body);
   dom.timeline.appendChild(li);
-  dom.timeline.scrollTop = dom.timeline.scrollHeight;
+  followFeed();
 }
 
 const CHECK_MARKS = { done: "done", not_done: "not done", unknown: "unknown" };
@@ -356,7 +368,14 @@ function renderVerified(v) {
   }
   li.append(head, list);
   dom.timeline.appendChild(li);
-  dom.timeline.scrollTop = dom.timeline.scrollHeight;
+  followFeed();
+}
+
+// Bring the read-back fully into view if it is not, as in one column, where it can land below the
+// window. Side by side the feed has already scrolled to it.
+function showReadBack() {
+  const readBack = dom.timeline.querySelector(".step-verified");
+  if (readBack) readBack.scrollIntoView({ block: "nearest" });
 }
 
 async function showAudit(runId) {
@@ -380,7 +399,7 @@ async function showAudit(runId) {
   link.textContent = "View the log";
   li.append(text, link);
   dom.timeline.appendChild(li);
-  dom.timeline.scrollTop = dom.timeline.scrollHeight;
+  followFeed();
 }
 
 // The access panel ends on what the systems report, not on what the steps implied.
