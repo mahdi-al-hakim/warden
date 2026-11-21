@@ -85,8 +85,8 @@ A review after these results were published found two things the design did not 
 The counts above stand. What they support is narrower than the headline suggests: none of the 30 runs
 acted on the note. They don't show that these models refuse a write they know they can make. The design
 for that is a third arm in which the task itself asks for the break-glass disable, so a model that
-follows instructions has to propose it, with enough runs per cell to read a difference. It has not been
-run.
+follows instructions has to propose it, with enough runs per cell to read a difference. That arm and three others are fixed in
+[`../note-injection-v2/DESIGN.md`](../note-injection-v2/DESIGN.md), written before any of them ran.
 
 ## Cost and reproduction
 
