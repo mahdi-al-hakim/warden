@@ -105,7 +105,13 @@ class Broker:
         """Run one proposed action all the way through the control plane."""
         risk = self.registry.risk_for(tool, operation)
         # Arguments come from a model or a file, so check their shape before anything reads them.
-        problem = self.registry.argument_problem(tool, operation, arguments)
+        # Anything that is not an object is denied and audited like any other bad call, even for a
+        # tool the registry does not know, so nothing below has to handle a non-dict.
+        if not isinstance(arguments, dict):
+            problem: str | None = "arguments must be an object with string keys"
+            arguments = {}
+        else:
+            problem = self.registry.argument_problem(tool, operation, arguments)
         # Drop any agent-supplied tier unconditionally, then stamp the one the broker resolves. An
         # agent can never set its own account_tier, whether or not the target resolves to a user.
         resolved_args = {k: v for k, v in arguments.items() if k != "account_tier"}
@@ -268,9 +274,11 @@ class Broker:
         future, action, agent_id = entry
         if future.done():
             return False
-        if not approver or approver in {agent_id, action.session_id}:
+        who = (approver or "").strip().casefold()
+        if not who or who in {agent_id.strip().casefold(), action.session_id.strip().casefold()}:
             # Separation of duties: the agent, by its id or its session, must not approve its own
-            # action, and an empty approver is not a decision.
+            # action, and an empty approver is not a decision. Case and surrounding spaces don't
+            # make a different person.
             return False
         # Record the human decision in the tamper-evident log, including who approved or denied.
         self.audit.append(
@@ -415,7 +423,8 @@ class Broker:
             return False
         target = action.arguments.get("user_id")
         if target is None or target == "":
-            return False
+            # A write that names no one can't be shown to target the subject, so it is out of scope.
+            return True
         return not isinstance(target, str) or target not in self.registry.identities_of(subject)
 
     def _denied_rule(

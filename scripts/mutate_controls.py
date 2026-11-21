@@ -104,11 +104,11 @@ MUTATIONS = [
     Mutation(
         "The audit chain detects tampering",
         "src/warden/audit/log.py",
-        """    def verify(self) -> VerifyResult:""",
-        """    def verify(self) -> VerifyResult:
+        """    def verify(self, expected_head: tuple[int, str] | None = None) -> VerifyResult:""",
+        """    def verify(self, expected_head: tuple[int, str] | None = None) -> VerifyResult:
         return VerifyResult(ok=True, checked=len(self._events))
 
-    def _unused_verify(self) -> VerifyResult:""",
+    def _unused_verify(self, expected_head: tuple[int, str] | None = None) -> VerifyResult:""",
     ),
     Mutation(
         "Arguments are checked before anything reads them",

@@ -145,8 +145,10 @@ class Session(BaseModel):
 class AuditEvent(BaseModel):
     """One entry in the append-only, hash-chained audit log.
 
-    `hash` covers this event's content and `prev_hash`, so any edit, insert or delete breaks the
-    chain. The log module computes and checks the hashes; the model only serializes its content.
+    `hash` covers this event's content and `prev_hash`, so an edit, an insert, or a delete with a
+    later entry still in place breaks the chain. Dropping the newest entries does not; checking
+    against a head recorded outside the log does (AuditLog.head and verify(expected_head)). The
+    log module computes and checks the hashes; the model only serializes its content.
     """
 
     schema_version: str = "1"

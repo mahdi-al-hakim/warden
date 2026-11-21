@@ -1,9 +1,10 @@
 """An append-only, hash-chained audit log.
 
 Each entry's hash covers its content and the previous hash, so any edit, insertion, or deletion
-that does not recompute the whole downstream chain is caught by verify(). A determined attacker who
-rewrites every later hash would defeat a plain chain; closing that gap means anchoring the head hash
-somewhere outside the log, which is out of scope here and is stated in the threat model.
+with a later entry still in place is caught by verify(). Two things a plain chain can't catch on its
+own: dropping the newest entries, and rewriting every later hash. Both are caught when the caller
+records head() somewhere outside the log and passes it back as verify(expected_head=...). Warden
+keeps no such outside record itself; the threat model says so.
 """
 
 from __future__ import annotations
@@ -63,8 +64,13 @@ class AuditLog:
         """A copy of the entries, oldest first."""
         return list(self._events)
 
-    def verify(self) -> VerifyResult:
-        """Walk the chain and confirm nothing was changed, inserted, or removed."""
+    def head(self) -> tuple[int, str]:
+        """The entry count and the newest hash, to record outside the log."""
+        return len(self._events), (self._events[-1].hash if self._events else GENESIS)
+
+    def verify(self, expected_head: tuple[int, str] | None = None) -> VerifyResult:
+        """Walk the chain and confirm nothing was changed, inserted, or removed. With an
+        expected_head recorded earlier, also confirm the log still reaches that entry unchanged."""
         prev = GENESIS
         for index, event in enumerate(self._events):
             if event.seq != index:
@@ -75,4 +81,11 @@ class AuditLog:
             if recomputed != event.hash:
                 return VerifyResult(False, index, event.seq, "hash does not match the content")
             prev = event.hash
+        if expected_head is not None:
+            count, digest = expected_head
+            if len(self._events) < count:
+                return VerifyResult(False, len(self._events), len(self._events),
+                                    "the log is shorter than the recorded head")
+            if count and self._events[count - 1].hash != digest:
+                return VerifyResult(False, count, count - 1, "the recorded head does not match")
         return VerifyResult(True, len(self._events))

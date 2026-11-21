@@ -34,7 +34,11 @@ pythonpath = ["src"]
 testpaths = ["tests/unit"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    # A third-party notice from starlette's test client about its own transport, not Warden code.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
 
 [tool.ruff]
 line-length = 100

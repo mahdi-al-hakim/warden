@@ -35,13 +35,16 @@ No action starts after a revoke; a call already in flight to an external system 
 and the audit records the revoke and the completion in their true order.
 
 **Malformed or hostile arguments.** Every call's arguments are checked against the operation's schema
-before anything reads them, and a bad call is denied and audited. The UI renders agent and record text
+before anything reads them, and a bad call, including one whose arguments are not an object at
+all, is denied and audited. A write that names no target is treated as outside the subject's scope. The UI renders agent and record text
 as text, never as HTML.
 
 **Quiet tampering with the record.** The audit log is hash-chained. Any edit or insertion, and any
 deletion that leaves a later entry in place, is caught by verify. Dropping the newest entries leaves a
-shorter but internally consistent chain, which only anchoring the head hash outside the log would catch
-(see Out of scope).
+shorter but internally consistent chain. `AuditLog.head()` gives the count and newest hash, and
+`verify(expected_head=...)` catches truncation or a full rewrite against a head recorded earlier, but
+Warden itself keeps no record outside the log, so that check is only as good as where the caller stores
+the head (see Out of scope).
 
 **Secrets in the log.** Values under secret-looking keys and credential-shaped values are removed before
 an entry is written, and emails and long digit runs are partially masked.
