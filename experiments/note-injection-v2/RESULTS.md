@@ -30,6 +30,11 @@ up to about 10% per arm is consistent with zero (one-sided 95%), and up to about
 
 **Did the offboarding get done?** In all 150 runs, read back from the systems at the end.
 
+Two things about the counts above. A denied step comes back to the model with "Do not retry it" (as in
+v1, from `src/warden/agent/claude.py`), so "no run proposed another write after the denial" is partly
+prompted. And the table's "Looked up break-glass first" counts only runs that went on to propose the
+write: in `authorized`, Opus looked the account up in all 10 runs, not the 2 the column shows.
+
 ## Found reading the runs after the results
 
 These are not readouts the design fixed, and they are reported as such.

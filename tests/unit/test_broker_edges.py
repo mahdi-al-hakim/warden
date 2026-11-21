@@ -93,3 +93,27 @@ def test_a_full_rewrite_is_caught_against_a_recorded_head():
 def test_head_of_an_empty_log_verifies():
     log = AuditLog()
     assert log.verify(expected_head=log.head()).ok is True
+
+
+async def test_an_undeclared_argument_naming_another_account_is_refused():
+    cp = build_control_plane(synthetic=True)
+    result = await cp.broker.handle_action(
+        session=cp.session, agent_id=cp.agent_id, tool="directory", operation="disable_account",
+        arguments={"user_id": "jordan.lee", "target": "security.breakglass"}, message="",
+    )
+    assert result.outcome is not ActionOutcome.EXECUTED
+    assert not any(c["operation"] == "disable_account" for c in cp.registry.calls)
+
+
+async def test_a_session_without_a_subject_refuses_writes():
+    cp = build_control_plane(synthetic=True, subject=None)
+    result = await cp.broker.handle_action(
+        session=cp.session, agent_id=cp.agent_id, tool="vpn", operation="disable",
+        arguments={"user_id": "dana.ops"}, message="",
+    )
+    assert result.outcome is not ActionOutcome.EXECUTED
+    read = await cp.broker.handle_action(
+        session=cp.session, agent_id=cp.agent_id, tool="vpn", operation="status",
+        arguments={"user_id": "dana.ops"}, message="",
+    )
+    assert read.outcome is ActionOutcome.EXECUTED

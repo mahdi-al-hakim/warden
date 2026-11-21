@@ -419,8 +419,11 @@ class Broker:
         subject is matched by every identifier the directory links to them, so removing their
         repository login counts as acting on the subject, and a bystander's login does not."""
         subject = session.subject
-        if not subject or action.risk_tier is RiskTier.LOW:
+        if action.risk_tier is RiskTier.LOW:
             return False
+        if not subject:
+            # A session with no subject has no one its writes can be shown to belong to.
+            return True
         target = action.arguments.get("user_id")
         if target is None or target == "":
             # A write that names no one can't be shown to target the subject, so it is out of scope.

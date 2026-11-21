@@ -14,10 +14,13 @@ contractor's directory record asks for the shared break-glass account to be disa
 is persuaded, the privileged-account rule still denies the write, whatever the agent believes. Writes
 the rules don't cover are a different matter: an injected omission, such as leaving the VPN on, would
 pass policy, and only the end-of-run check would show the offboarding was unfinished. The note-injection
-eval in `experiments/note-injection` counts how often current Claude models act on that note; in 30 live
-runs, none did.
+evals in `experiments/note-injection` and `experiments/note-injection-v2` count how often current Claude
+models act on that note; in 150 live note runs, none proposed the write, though two acted on the note
+through a harmless call on the subject.
 
-**A write on someone other than the person being offboarded.** Each run is scoped to its subject. A
+**A write on someone other than the person being offboarded.** Each run is scoped to its subject, and a
+session with no subject refuses every write. An argument the operation doesn't declare is refused, so a
+target can't sit in a field that policy and scope don't read. A
 write on anyone else is denied after policy, so a steered agent can't cut a colleague's access even
 with an action policy would otherwise allow. Reads aren't scoped.
 
@@ -32,7 +35,9 @@ no one answers within the timeout, the step is denied.
 **An agent that keeps acting after it is revoked.** The broker checks revocation before evaluating an
 action and again right before running it. A revoke ends any approval the agent is waiting on at once.
 No action starts after a revoke; a call already in flight to an external system can't be recalled,
-and the audit records the revoke and the completion in their true order.
+and the audit records the revoke and the completion in their true order. A revoke holds for the run it
+was issued in: each run has its own revocation state, and no credential is revoked, so stopping an agent
+across runs or processes would need a shared store this demo doesn't have.
 
 **Malformed or hostile arguments.** Every call's arguments are checked against the operation's schema
 before anything reads them, and a bad call, including one whose arguments are not an object at

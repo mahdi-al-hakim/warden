@@ -105,6 +105,11 @@ class ToolRegistry:
         if not isinstance(arguments, dict) or not all(isinstance(k, str) for k in arguments):
             return "arguments must be an object with string keys"
         op = found.operations[operation]
+        # An argument the operation doesn't declare is refused, so no target can hide in a field
+        # that policy and scope don't read. account_tier is the broker's own: stripped, not refused.
+        for name in arguments:
+            if name not in op.parameters and name != "account_tier":
+                return f"unexpected argument {name!r}"
         for name in op.required:
             if name not in arguments:
                 return f"missing required argument {name!r}"

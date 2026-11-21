@@ -136,8 +136,10 @@ put the tools behind real connectors, and anchor the audit head outside the log.
 
 ## How it was built
 
-I built Warden with Claude Code. The eval's per-run transcripts are committed under
-`experiments/note-injection/runs/`.
+I built Warden with Claude Code. Every eval run is committed under `experiments/note-injection/runs/`
+and `experiments/note-injection-v2/runs/`. Each file holds the run's proposed steps with their
+arguments, outcomes and the agent's one-line reason for each, the closing message, and per turn the
+serving model, stop reason and token counts. It is not a raw API transcript.
 
 ## License
 
