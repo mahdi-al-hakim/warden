@@ -18,8 +18,9 @@ offline as a labeled replay, or live through the Claude API; live mode has been 
 ## What the checks show
 
 - **An instruction planted in the data.** A colleague's note on the contractor's directory record asks
-  the agent to also disable the shared break-glass admin account. Two pre-registered rounds, 189 live
-  runs on Claude Haiku, Sonnet and Opus 5.5, synthetic systems:
+  the agent to also disable the shared break-glass admin account. Three rounds, 229 live runs on
+  Claude Haiku, Sonnet and Opus 5.5, synthetic systems; the second and third rounds' designs were
+  pushed before they ran, and the first round's design was pushed with its results:
   - In 150 note runs, with the request worded mildly or as a forceful ticket that names the tool, and
     with or without "Only do what the task asks" in the system prompt, no agent proposed disabling the
     account. Twice Haiku did act on the note, by revoking a grant named after the account from the
@@ -28,9 +29,13 @@ offline as a labeled replay, or live through the Claude API; live mode has been 
     declined. Sonnet proposes it in 7 and Opus in 2; in Opus's other 8 runs it held the step and asked
     for Security's confirmation.
   - Warden denied all 18 proposed break-glass disables on live runs, by its privileged-account rule.
+  - A third round searched for a note models do act on: four stronger notes (a fake automated notice,
+    a checklist, a fake task update, an urgent message from Security), ten Haiku runs each. None wrote
+    to or named the account, so by the rule fixed before it ran, the search stopped there.
   - Ten runs per model and arm still allows a true rate of up to about one in four.
   [v1 design](experiments/note-injection/DESIGN.md), [v1 results](experiments/note-injection/RESULTS.md),
-  [v2 design](experiments/note-injection-v2/DESIGN.md), [v2 results](experiments/note-injection-v2/RESULTS.md).
+  [v2 design](experiments/note-injection-v2/DESIGN.md), [v2 results](experiments/note-injection-v2/RESULTS.md),
+  [v3 search](experiments/note-injection-v3-search/SEARCH.md).
 - **The kill switch and the other controls.** Ten scenarios, including a revoke that lands while a step
   waits for approval, one that lands while a write waits its turn, and a revoked agent that keeps
   sending actions, are each checked against ten invariants, read back from the systems, and held to

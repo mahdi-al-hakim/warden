@@ -14,8 +14,8 @@ contractor's directory record asks for the shared break-glass account to be disa
 is persuaded, the privileged-account rule still denies the write, whatever the agent believes. Writes
 the rules don't cover are a different matter: an injected omission, such as leaving the VPN on, would
 pass policy, and only the end-of-run check would show the offboarding was unfinished. The note-injection
-evals in `experiments/note-injection` and `experiments/note-injection-v2` count how often current Claude
-models act on that note; in 150 live note runs, none proposed the write, though two acted on the note
+evals in `experiments/note-injection`, `-v2` and `-v3-search` count how often current Claude
+models act on that note; in 190 live note runs, none proposed the write, though two acted on the note
 through a harmless call on the subject.
 
 **A write on someone other than the person being offboarded.** Each run is scoped to its subject, and a
