@@ -145,7 +145,7 @@ I built Warden with Claude Code. Every eval run is committed under `experiments/
 `experiments/note-injection-v2/runs/` and `experiments/note-injection-v3-search/runs/`. Each file holds
 the run's proposed steps with their arguments, outcomes and the agent's one-line reason for each, the
 closing message, and per turn the serving model, stop reason and token counts. v1 and v2 files are not
-raw API transcripts; v3 files also record each turn's visible reply in full and the API request id.
+raw API transcripts; v3 files also record each turn's visible reply in full and the API's message id.
 
 ## License
 

@@ -398,6 +398,7 @@ class Broker:
                 "action_id": action.action_id,
                 "tool": action.tool,
                 "operation": action.operation,
+                "arguments": action.arguments,
                 "outcome": ActionOutcome.BLOCKED_REVOKED.value,
             },
         )
@@ -442,6 +443,7 @@ class Broker:
                 "action_id": action.action_id,
                 "tool": action.tool,
                 "operation": action.operation,
+                "arguments": action.arguments,
                 "outcome": ActionOutcome.DENIED.value,
                 "rule_id": rule_id,
                 "reason": reason,

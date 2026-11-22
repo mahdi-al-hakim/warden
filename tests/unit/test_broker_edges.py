@@ -117,3 +117,21 @@ async def test_a_session_without_a_subject_refuses_writes():
         arguments={"user_id": "dana.ops"}, message="",
     )
     assert read.outcome is ActionOutcome.EXECUTED
+
+
+def test_revoking_a_grant_the_user_does_not_hold_fails():
+    cp = build_control_plane(synthetic=True)
+    directory = cp.registry.get("directory")
+    result = directory.run("revoke_access", {"user_id": "jordan.lee", "app": "security.breakglass"})
+    assert result.ok is False
+    assert "no grant" in result.error
+
+
+async def test_a_refused_call_is_audited_with_its_arguments():
+    cp = build_control_plane(synthetic=True)
+    await cp.broker.handle_action(
+        session=cp.session, agent_id=cp.agent_id, tool="vpn", operation="disable",
+        arguments={"user_id": "dana.ops"}, message="",
+    )
+    blocked = [e for e in cp.broker.audit.events if e.kind == "action.blocked"]
+    assert blocked and blocked[-1].data.get("arguments", {}).get("user_id") == "dana.ops"

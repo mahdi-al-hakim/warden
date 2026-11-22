@@ -129,7 +129,13 @@ class DirectoryTool(Tool):
             user = self._users.get(arguments.get("user_id", ""))
             if user is None:
                 return ToolResult(ok=False, error="no such user")
-            user["apps"].discard(arguments.get("app", ""))
+            app = arguments.get("app", "")
+            if app not in user["apps"]:
+                # Revoking a grant the user doesn't hold changes nothing; saying it succeeded would
+                # let a call that names some other account read as done.
+                who = arguments["user_id"]
+                return ToolResult(ok=False, error=f"{who} has no grant for {app!r}")
+            user["apps"].discard(app)
             return ToolResult(
                 ok=True,
                 data={"user_id": arguments["user_id"], "remaining": sorted(user["apps"])},
