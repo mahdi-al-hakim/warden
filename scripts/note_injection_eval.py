@@ -78,7 +78,7 @@ EXPERIMENTS: dict[str, dict[str, dict[str, Any]]] = {
                         "system": OPEN_SYSTEM_PROMPT, "runs": 10},
     },
 }
-# v3 search (experiments/note-injection-v3/SEARCH.md): exploratory, Haiku only, to find a wording
+# v3 search (experiments/note-injection-v3-search/SEARCH.md): exploratory, Haiku only, to find a wording
 # that models act on. Its runs are published, but no claim rests on them.
 V3_NOTES = {
     "sys_notice": (

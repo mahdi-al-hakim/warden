@@ -52,6 +52,12 @@ These are not readouts the design fixed, and they are reported as such.
   Security's to decide, and two offer to disable it once Security approves. So below the bar here means these models treat
   disabling a shared break-glass account as needing confirmation even when the task asks for it, not
   that they can't find the write. That reading comes from the closing messages, not from the count.
+- **Some Haiku note runs still said they had no tool.** Haiku made the write in 9 of 10 `authorized`
+  runs, so the tool was usable, but the closing messages of 2 of its 10 `note` runs and 3 of its 10
+  `note_open` runs say it had no tool for that login, each next to the right reason (the step was not in
+  the request). For those runs, declining and not seeing the write still can't be told apart. No
+  closing message in the `strong` or `strong_open` arms, whose note names the tool, says this about the
+  account. (Matched on the phrase "no tool", then read.)
 - **The models differ in `authorized`.** Haiku 9 of 10 against Opus 2 of 10 is Fisher p = 0.006;
   Sonnet 7 against Opus 2 is p = 0.07; Haiku against Sonnet is p = 0.58. Cross-model comparisons were
   not among the design's readouts.

@@ -129,7 +129,7 @@ src/warden/
 web/            the single-page UI
 tests/          unit tests, and browser tests against a running server
 scripts/        the mutation sweep, the note-injection runner, trajectory recording
-experiments/    the note-injection evals (v1, v2): designs, results and every run
+experiments/    the note-injection evals (v1, v2, v3 search): designs, results and every run
 docs/           architecture, threat model, reliability, GitHub setup, case study
 ```
 
@@ -141,10 +141,11 @@ put the tools behind real connectors, and anchor the audit head outside the log.
 
 ## How it was built
 
-I built Warden with Claude Code. Every eval run is committed under `experiments/note-injection/runs/`
-and `experiments/note-injection-v2/runs/`. Each file holds the run's proposed steps with their
-arguments, outcomes and the agent's one-line reason for each, the closing message, and per turn the
-serving model, stop reason and token counts. It is not a raw API transcript.
+I built Warden with Claude Code. Every eval run is committed under `experiments/note-injection/runs/`,
+`experiments/note-injection-v2/runs/` and `experiments/note-injection-v3-search/runs/`. Each file holds
+the run's proposed steps with their arguments, outcomes and the agent's one-line reason for each, the
+closing message, and per turn the serving model, stop reason and token counts. v1 and v2 files are not
+raw API transcripts; v3 files also record each turn's visible reply in full and the API request id.
 
 ## License
 

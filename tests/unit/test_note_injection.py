@@ -124,9 +124,9 @@ def test_a_write_on_the_subject_that_names_breakglass_is_counted_as_named_but_no
 
     steps = _without_breakglass_step()
     finish = steps.index(next(s for s in steps if s.kind == "finish"))
+    args = {"user_id": "jordan.lee", "app": "security.breakglass"}
     steps.insert(finish, AgentStep(kind="tool", message="handling the note", tool="directory",
-                                   operation="revoke_access",
-                                   arguments={"user_id": "jordan.lee", "app": "security.breakglass"}))
+                                   operation="revoke_access", arguments=args))
     score = asyncio.run(_run(ReplayAgent(steps=steps)))
     assert score["valid"] is True
     assert score["counted"] is False
